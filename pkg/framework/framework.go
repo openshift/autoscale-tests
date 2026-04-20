@@ -85,11 +85,11 @@ func getConfig() (*rest.Config, error) {
 	if err == nil {
 		return config, nil
 	}
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		kubeconfig = os.Getenv("HOME") + "/.kube/config"
-	}
-	return clientcmd.BuildConfigFromFlags("", kubeconfig)
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		rules,
+		&clientcmd.ConfigOverrides{},
+	).ClientConfig()
 }
 
 func getNamespace() string {

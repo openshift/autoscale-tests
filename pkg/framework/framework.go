@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
+	"text/template"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -13,9 +16,11 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
+	rt "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -25,6 +30,11 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// ObjectKey is an alias for types.NamespacedName for convenience in tests
+type ObjectKey = types.NamespacedName
+
+// Framework Helpers
 
 type Framework struct {
 	Client     client.Client
@@ -60,8 +70,8 @@ func NewFramework() (*Framework, error) {
 	}, nil
 }
 
-func newScheme() *runtime.Scheme {
-	scheme := runtime.NewScheme()
+func newScheme() *rt.Scheme {
+	scheme := rt.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(corev1.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
@@ -75,12 +85,10 @@ func getConfig() (*rest.Config, error) {
 	if err == nil {
 		return config, nil
 	}
-
 	kubeconfig := os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
 		kubeconfig = os.Getenv("HOME") + "/.kube/config"
 	}
-
 	return clientcmd.BuildConfigFromFlags("", kubeconfig)
 }
 
@@ -96,7 +104,7 @@ func (f *Framework) WithTimeout(timeout time.Duration) context.Context {
 	return ctx
 }
 
-// ==================== Pod Operations ====================
+// Pod Helpers
 
 func (f *Framework) GetPod(ctx context.Context, name, namespace string) (*corev1.Pod, error) {
 	pod := &corev1.Pod{}
@@ -106,11 +114,10 @@ func (f *Framework) GetPod(ctx context.Context, name, namespace string) (*corev1
 
 func (f *Framework) ListPods(ctx context.Context, namespace string, labelSelector map[string]string) (*corev1.PodList, error) {
 	podList := &corev1.PodList{}
-	opts := &client.ListOptions{
+	err := f.Client.List(ctx, podList, &client.ListOptions{
 		Namespace:     namespace,
 		LabelSelector: labels.SelectorFromSet(labelSelector),
-	}
-	err := f.Client.List(ctx, podList, opts)
+	})
 	return podList, err
 }
 
@@ -130,7 +137,6 @@ func (f *Framework) WaitForPodsWithLabel(ctx context.Context, namespace string, 
 		if err != nil {
 			return false, nil
 		}
-
 		readyCount := 0
 		for _, pod := range pods.Items {
 			if isPodReady(&pod) {
@@ -143,17 +149,12 @@ func (f *Framework) WaitForPodsWithLabel(ctx context.Context, namespace string, 
 
 func (f *Framework) ExecInPod(ctx context.Context, namespace, podName, containerName string, command []string) (string, string, error) {
 	req := f.Clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(podName).
-		Namespace(namespace).
-		SubResource("exec").
+		Resource("pods").Name(podName).Namespace(namespace).SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: containerName,
 			Command:   command,
-			Stdin:     false,
 			Stdout:    true,
 			Stderr:    true,
-			TTY:       false,
 		}, clientgoscheme.ParameterCodec)
 
 	exec, err := remotecommand.NewSPDYExecutor(f.RestConfig, "POST", req.URL())
@@ -162,40 +163,27 @@ func (f *Framework) ExecInPod(ctx context.Context, namespace, podName, container
 	}
 
 	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr})
 	return stdout.String(), stderr.String(), err
 }
 
 func (f *Framework) GetPodLogs(ctx context.Context, namespace, podName, containerName string, tailLines int64) (string, error) {
-	opts := &corev1.PodLogOptions{
+	req := f.Clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 		Container: containerName,
 		TailLines: &tailLines,
-	}
-
-	req := f.Clientset.CoreV1().Pods(namespace).GetLogs(podName, opts)
+	})
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer stream.Close()
-
 	buf := new(bytes.Buffer)
 	_, err = io.Copy(buf, stream)
 	return buf.String(), err
 }
 
 func (f *Framework) DeletePod(ctx context.Context, name, namespace string) error {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-	}
-	return f.Client.Delete(ctx, pod)
+	return f.Client.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
 }
 
 func isPodReady(pod *corev1.Pod) bool {
@@ -210,11 +198,10 @@ func isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
-// ==================== Namespace Operations ====================
+// Namespace Helpers
 
 func (f *Framework) NamespaceExists(ctx context.Context, name string) (bool, error) {
-	ns := &corev1.Namespace{}
-	err := f.Client.Get(ctx, client.ObjectKey{Name: name}, ns)
+	err := f.Client.Get(ctx, client.ObjectKey{Name: name}, &corev1.Namespace{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
@@ -227,13 +214,10 @@ func (f *Framework) NamespaceExists(ctx context.Context, name string) (bool, err
 func (f *Framework) CreateNamespace(ctx context.Context, name string) (*corev1.Namespace, error) {
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				"test-suite": "autoscale-tests",
-			},
+			Name:   name,
+			Labels: map[string]string{"test-suite": "autoscale-tests"},
 		},
 	}
-
 	err := f.Client.Create(ctx, ns)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
@@ -241,15 +225,278 @@ func (f *Framework) CreateNamespace(ctx context.Context, name string) (*corev1.N
 		}
 		return nil, fmt.Errorf("failed to create namespace: %w", err)
 	}
-
 	return ns, nil
 }
 
 func (f *Framework) DeleteNamespace(ctx context.Context, name string) error {
-	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+	return client.IgnoreNotFound(f.Client.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}))
+}
+
+func (f *Framework) CreateTestNamespace(ctx context.Context, prefix string) (string, error) {
+	name := fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	_, err := f.CreateNamespace(ctx, name)
+	return name, err
+}
+
+func (f *Framework) CleanupTestNamespace(ctx context.Context, name string) error {
+	if err := f.DeleteNamespace(ctx, name); err != nil {
+		return err
+	}
+	return wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		exists, err := f.NamespaceExists(ctx, name)
+		return !exists, err
+	})
+}
+
+// Deployment Helpers
+
+type DeploymentConfig struct {
+	Name          string
+	Namespace     string
+	Replicas      int32
+	Image         string
+	CPURequest    string
+	MemoryRequest string
+	CPULimit      string
+	MemoryLimit   string
+	Labels        map[string]string
+}
+
+func DefaultDeploymentConfig(name, namespace string) DeploymentConfig {
+	return DeploymentConfig{
+		Name:          name,
+		Namespace:     namespace,
+		Replicas:      1,
+		Image:         "registry.k8s.io/pause:3.9",
+		CPURequest:    "50m",
+		MemoryRequest: "64Mi",
+		CPULimit:      "100m",
+		MemoryLimit:   "128Mi",
+		Labels:        map[string]string{"app": name},
+	}
+}
+
+func (f *Framework) CreateDeployment(ctx context.Context, cfg DeploymentConfig) (*appsv1.Deployment, error) {
+	if cfg.Labels == nil {
+		cfg.Labels = map[string]string{"app": cfg.Name}
+	}
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: cfg.Name, Namespace: cfg.Namespace, Labels: cfg.Labels},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &cfg.Replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: cfg.Labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: cfg.Labels},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  "test-container",
+						Image: cfg.Image,
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse(cfg.CPURequest),
+								corev1.ResourceMemory: resource.MustParse(cfg.MemoryRequest),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse(cfg.CPULimit),
+								corev1.ResourceMemory: resource.MustParse(cfg.MemoryLimit),
+							},
+						},
+					}},
+				},
+			},
 		},
 	}
-	return client.IgnoreNotFound(f.Client.Delete(ctx, ns))
+	err := f.Client.Create(ctx, deployment)
+	return deployment, err
+}
+
+func (f *Framework) GetDeployment(ctx context.Context, name, namespace string) (*appsv1.Deployment, error) {
+	deployment := &appsv1.Deployment{}
+	err := f.Client.Get(ctx, ObjectKey{Name: name, Namespace: namespace}, deployment)
+	return deployment, err
+}
+
+func (f *Framework) DeleteDeployment(ctx context.Context, name, namespace string) error {
+	return f.Client.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
+}
+
+func (f *Framework) WaitForDeploymentReady(ctx context.Context, name, namespace string, timeout time.Duration) error {
+	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		deployment, err := f.GetDeployment(ctx, name, namespace)
+		if err != nil {
+			return false, nil
+		}
+		return deployment.Status.ReadyReplicas == *deployment.Spec.Replicas, nil
+	})
+}
+
+func (f *Framework) WaitForDeploymentReplicas(ctx context.Context, name, namespace string, replicas int32, timeout time.Duration) error {
+	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		deployment, err := f.GetDeployment(ctx, name, namespace)
+		if err != nil {
+			return false, nil
+		}
+		return deployment.Status.ReadyReplicas >= replicas, nil
+	})
+}
+
+// HPA Helpers
+
+type HPAConfig struct {
+	Name                 string
+	Namespace            string
+	TargetDeployment     string
+	MinReplicas          int32
+	MaxReplicas          int32
+	CPUTargetUtilization *int32
+	MemoryAverageValue   string
+	CPUAverageValue      string
+}
+
+func DefaultHPAConfig(name, namespace, targetDeployment string) HPAConfig {
+	cpuTarget := int32(50)
+	return HPAConfig{
+		Name:                 name,
+		Namespace:            namespace,
+		TargetDeployment:     targetDeployment,
+		MinReplicas:          1,
+		MaxReplicas:          5,
+		CPUTargetUtilization: &cpuTarget,
+	}
+}
+
+func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv2.HorizontalPodAutoscaler, error) {
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: cfg.Name, Namespace: cfg.Namespace},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       cfg.TargetDeployment,
+			},
+			MinReplicas: &cfg.MinReplicas,
+			MaxReplicas: cfg.MaxReplicas,
+			Metrics:     []autoscalingv2.MetricSpec{},
+		},
+	}
+
+	if cfg.CPUTargetUtilization != nil {
+		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
+			Type: autoscalingv2.ResourceMetricSourceType,
+			Resource: &autoscalingv2.ResourceMetricSource{
+				Name: corev1.ResourceCPU,
+				Target: autoscalingv2.MetricTarget{
+					Type:               autoscalingv2.UtilizationMetricType,
+					AverageUtilization: cfg.CPUTargetUtilization,
+				},
+			},
+		})
+	}
+	if cfg.CPUAverageValue != "" {
+		q := resource.MustParse(cfg.CPUAverageValue)
+		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
+			Type: autoscalingv2.ResourceMetricSourceType,
+			Resource: &autoscalingv2.ResourceMetricSource{
+				Name: corev1.ResourceCPU,
+				Target: autoscalingv2.MetricTarget{
+					Type:         autoscalingv2.AverageValueMetricType,
+					AverageValue: &q,
+				},
+			},
+		})
+	}
+	if cfg.MemoryAverageValue != "" {
+		q := resource.MustParse(cfg.MemoryAverageValue)
+		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
+			Type: autoscalingv2.ResourceMetricSourceType,
+			Resource: &autoscalingv2.ResourceMetricSource{
+				Name: corev1.ResourceMemory,
+				Target: autoscalingv2.MetricTarget{
+					Type:         autoscalingv2.AverageValueMetricType,
+					AverageValue: &q,
+				},
+			},
+		})
+	}
+
+	err := f.Client.Create(ctx, hpa)
+	return hpa, err
+}
+
+func (f *Framework) GetHPA(ctx context.Context, name, namespace string) (*autoscalingv2.HorizontalPodAutoscaler, error) {
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{}
+	err := f.Client.Get(ctx, ObjectKey{Name: name, Namespace: namespace}, hpa)
+	return hpa, err
+}
+
+func (f *Framework) DeleteHPA(ctx context.Context, name, namespace string) error {
+	return f.Client.Delete(ctx, &autoscalingv2.HorizontalPodAutoscaler{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}})
+}
+
+func (f *Framework) WaitForHPAScaleUp(ctx context.Context, hpaName, namespace string, minReplicas int32, timeout time.Duration) error {
+	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		hpa, err := f.GetHPA(ctx, hpaName, namespace)
+		if err != nil {
+			return false, nil
+		}
+		return hpa.Status.CurrentReplicas > minReplicas, nil
+	})
+}
+
+func (f *Framework) WaitForHPAScaleDown(ctx context.Context, hpaName, namespace string, targetReplicas int32, timeout time.Duration) error {
+	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		hpa, err := f.GetHPA(ctx, hpaName, namespace)
+		if err != nil {
+			return false, nil
+		}
+		return hpa.Status.CurrentReplicas <= targetReplicas, nil
+	})
+}
+
+// Templates
+
+// HPATemplateConfig holds data for rendering hpa_template.yaml
+type HPATemplateConfig struct {
+	ResourceName               string
+	Namespace                  string
+	DeploymentName             string
+	MinReplicas                int32
+	MaxReplicas                int32
+	Metrics                    []HPAMetric
+	StabilizationWindowSeconds int
+}
+
+// HPAMetric represents a single metric in the HPA template
+type HPAMetric struct {
+	Name         string
+	AverageValue string
+}
+
+// RenderHPATemplate renders hpa_template.yaml
+func RenderHPATemplate(cfg HPATemplateConfig) (string, error) {
+	return RenderTemplate("hpa_template.yaml", cfg)
+}
+
+// RenderTemplate renders a Go template file from testdata/ with the given data
+func RenderTemplate(templateFile string, data interface{}) (string, error) {
+	_, filename, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(filename), "..", "..")
+	path := filepath.Join(root, "testdata", templateFile)
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read template %s: %w", path, err)
+	}
+
+	tmpl, err := template.New(templateFile).Parse(string(content))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template %s: %w", templateFile, err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to render template %s: %w", templateFile, err)
+	}
+
+	return buf.String(), nil
 }

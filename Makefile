@@ -144,31 +144,29 @@ goimports: ## Go fmt your code
 	hack/goimports.sh ./cluster-autoscaler/cloudprovider/clusterapi
 
 # E2E Tests
+# Use GINKGO_FLAGS to pass extra flags, e.g.: make test-e2e-hpa GINKGO_FLAGS="--label-filter=slow"
+GINKGO_FLAGS ?=
 
 .PHONY: test-e2e
 test-e2e: ## Run all E2E tests
-	go test -v -timeout 30m ./test/e2e/...
+	go test -v -timeout 30m ./test/e2e/... -args -ginkgo.v $(GINKGO_FLAGS)
 
 .PHONY: test-e2e-vpa
 test-e2e-vpa: ## Run VPA E2E tests
-	go test -v -timeout 30m ./test/e2e/vpa/...
+	go test -v -timeout 30m ./test/e2e/vpa/... -args -ginkgo.v $(GINKGO_FLAGS)
 
 .PHONY: test-e2e-hpa
 test-e2e-hpa: ## Run HPA E2E tests
-	go test -v -timeout 30m ./test/e2e/hpa/...
+	go test -v -timeout 30m ./test/e2e/hpa/... -args -ginkgo.v $(GINKGO_FLAGS)
 
 .PHONY: test-e2e-cro
 test-e2e-cro: ## Run CRO E2E tests
-	go test -v -timeout 30m ./test/e2e/cro/...
+	go test -v -timeout 30m ./test/e2e/cro/... -args -ginkgo.v $(GINKGO_FLAGS)
 
 .PHONY: test-e2e-cma
 test-e2e-cma: ## Run CMA E2E tests
-	go test -v -timeout 30m ./test/e2e/cma/...
+	go test -v -timeout 30m ./test/e2e/cma/... -args -ginkgo.v $(GINKGO_FLAGS)
 
 .PHONY: test-e2e-autonode
 test-e2e-autonode: ## Run AutoNode E2E tests
-	go test -v -timeout 30m ./test/e2e/autonode/...
-
-.PHONY: test-e2e-ginkgo
-test-e2e-ginkgo: ## Run E2E tests with Ginkgo CLI (should be better output)
-	ginkgo -v -progress --timeout=30m ./test/e2e/...
+	go test -v -timeout 30m ./test/e2e/autonode/... -args -ginkgo.v $(GINKGO_FLAGS)

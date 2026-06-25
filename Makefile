@@ -15,6 +15,9 @@ GO111MODULE = on
 export GO111MODULE
 GOFLAGS ?=
 
+PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
+GOLANGCI_LINT = go run ${PROJECT_DIR}/vendor/github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+
 export GOFLAGS
 export TESTFLAGS
 # If set to 1, create an isolated GOPATH inside _output using symlinks to avoid
@@ -127,9 +130,13 @@ build-images: build-rpms
 	hack/build-images.sh
 .PHONY: build-images
 
+.PHONY: lint-fix
+lint-fix: ## Go lint and fix your code
+	( GOLANGCI_LINT_CACHE=$(PROJECT_DIR)/.cache $(GOLANGCI_LINT) run --fix --timeout 10m )
+
 .PHONY: lint
 lint: ## Go lint your code
-	hack/go-lint.sh -min_confidence 0.9 ./cluster-autoscaler/cloudprovider/clusterapi/...
+	( GOLANGCI_LINT_CACHE=$(PROJECT_DIR)/.cache $(GOLANGCI_LINT) run --timeout 10m )
 
 .PHONY: fmt
 fmt: ## Go fmt your code

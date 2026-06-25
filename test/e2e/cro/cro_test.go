@@ -17,25 +17,31 @@ var operatorInstalledByTest bool
 
 var _ = BeforeSuite(func() {
 	var err error
+
 	f, err = framework.NewFramework()
 	Expect(err).NotTo(HaveOccurred(), "Failed to create framework")
 
 	By("Checking if CRO operator is already installed")
+
 	installed, err := f.IsOperatorSubscribed(f.Ctx, "clusterresourceoverride", framework.CRONamespace)
 	Expect(err).NotTo(HaveOccurred())
 	GinkgoWriter.Printf("[BeforeSuite] CRO already installed: %v\n", installed)
 
 	if !installed {
 		operatorInstalledByTest = true
+
 		By("Installing CRO operator from catalog")
+
 		err = f.InstallOperatorByKey(f.Ctx, "cro")
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRO operator")
 
 		By("Waiting for CRO operator CSV to be ready")
+
 		err = f.WaitForOperatorCSVReady(f.Ctx, framework.CRONamespace, 5*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "CRO operator CSV did not become ready")
 
 		By("Waiting for CRO operator pods to be ready")
+
 		err = f.WaitForOperatorReady(f.Ctx, "cro", 3*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "CRO operator pods did not become ready")
 		GinkgoWriter.Printf("[BeforeSuite] CRO operator installed and ready\n")
@@ -46,6 +52,7 @@ var _ = AfterSuite(func() {
 	if f != nil && operatorInstalledByTest {
 		By("Uninstalling CRO operator (installed by test)")
 		GinkgoWriter.Printf("[AfterSuite] Uninstalling CRO operator...\n")
+
 		err := f.UninstallOperatorByKey(f.Ctx, "cro")
 		Expect(err).NotTo(HaveOccurred(), "Failed to uninstall CRO operator")
 	} else {
@@ -54,9 +61,7 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("Cluster Resource Override Operator", func() {
-
 	Context("Installation verification", func() {
-
 		It("should have the CRO namespace", func() {
 			exists, err := f.NamespaceExists(f.Ctx, framework.CRONamespace)
 			Expect(err).NotTo(HaveOccurred())
@@ -70,6 +75,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 				"Should have at least one CRO operator pod in namespace %s", framework.CRONamespace)
 
 			By("Listing found pods")
+
 			for _, pod := range pods.Items {
 				GinkgoWriter.Printf("  - Pod: %s, Status: %s\n", pod.Name, pod.Status.Phase)
 			}
@@ -82,13 +88,13 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 	})
 
 	Context("Resource override with opt-in", func() {
-
 		// CRO config used for all opt-in tests:
 		//   LimitCPUToMemoryPercent:    200  →  CPU limit = memory_limit_in_Mi * 2 (as millicores)
 		//   CPURequestToLimitPercent:    25  →  CPU request = CPU limit * 0.25
 		//   MemoryRequestToLimitPercent: 50  →  Memory request = memory limit * 0.50
 		BeforeEach(func() {
 			By("Ensuring ClusterResourceOverride CR exists with standard ratios")
+
 			err := f.CreateClusterResourceOverride(f.Ctx, framework.CROConfig{
 				LimitCPUToMemoryPercent:     200,
 				CPURequestToLimitPercent:    25,
@@ -97,13 +103,16 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for CRO admission webhook to become available")
+
 			err = f.WaitForClusterResourceOverrideReady(f.Ctx, 3*time.Minute)
 			Expect(err).NotTo(HaveOccurred(), "CRO admission webhook should become available")
 		})
 
 		It("should override resources on a single container", func() {
 			nsName := fmt.Sprintf("cro-single-%d", time.Now().UnixNano())
+
 			By("Creating opt-in namespace")
+
 			err := f.CreateCROOptInNamespace(f.Ctx, nsName)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.CleanupTestNamespace(f.Ctx, nsName) })
@@ -112,6 +121,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			originalMem := int64(512 * 1024 * 1024) // 512Mi
 
 			By("Creating pod with resource requests and limits")
+
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-single", nsName, []corev1.Container{{
 				Name:  "app",
 				Image: "registry.k8s.io/pause:3.9",
@@ -136,12 +146,14 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 				container.Resources.Requests.Memory().String(), container.Resources.Limits.Memory().String())
 
 			By("Verifying CRO lowered CPU limit from original 2000m (LimitCPUToMemoryPercent=200)")
+
 			cpuLimit := container.Resources.Limits.Cpu().MilliValue()
 			Expect(cpuLimit).To(BeNumerically("<", originalCPU),
 				"CRO should reduce CPU limit based on memory limit ratio")
 			Expect(cpuLimit).To(BeNumerically(">", 0))
 
 			By("Verifying CRO set CPU request lower than CPU limit (CPURequestToLimitPercent=25)")
+
 			cpuReq := container.Resources.Requests.Cpu().MilliValue()
 			Expect(cpuReq).To(BeNumerically("<", cpuLimit),
 				"CPU request should be a fraction of CPU limit")
@@ -151,6 +163,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			Expect(container.Resources.Limits.Memory().Value()).To(Equal(originalMem))
 
 			By("Verifying CRO set memory request lower than memory limit (MemoryRequestToLimitPercent=50)")
+
 			memReq := container.Resources.Requests.Memory().Value()
 			Expect(memReq).To(BeNumerically("<", originalMem),
 				"Memory request should be a fraction of memory limit")
@@ -159,7 +172,9 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 		It("should override resources on multiple containers", func() {
 			nsName := fmt.Sprintf("cro-multi-%d", time.Now().UnixNano())
+
 			By("Creating opt-in namespace")
+
 			err := f.CreateCROOptInNamespace(f.Ctx, nsName)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.CleanupTestNamespace(f.Ctx, nsName) })
@@ -167,6 +182,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			// Both containers have CPU limit higher than what CRO would compute,
 			// so CRO will lower the CPU limit and set requests accordingly.
 			By("Creating pod with two containers")
+
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-multi", nsName, []corev1.Container{
 				{
 					Name:  "db",
@@ -208,6 +224,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			}
 
 			By("Verifying 'db' container: CRO lowered CPU limit and set requests")
+
 			db := findContainer(pod.Spec.Containers, "db")
 			Expect(db).NotTo(BeNil())
 			Expect(db.Resources.Limits.Cpu().MilliValue()).To(BeNumerically("<", 4000),
@@ -218,6 +235,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 				"db memory request should be a fraction of memory limit")
 
 			By("Verifying 'app' container: CRO lowered CPU limit and set requests")
+
 			app := findContainer(pod.Spec.Containers, "app")
 			Expect(app).NotTo(BeNil())
 			Expect(app.Resources.Limits.Cpu().MilliValue()).To(BeNumerically("<", 2000),
@@ -232,9 +250,9 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 	})
 
 	Context("Init container override", func() {
-
 		BeforeEach(func() {
 			By("Ensuring ClusterResourceOverride CR exists with standard ratios")
+
 			err := f.CreateClusterResourceOverride(f.Ctx, framework.CROConfig{
 				LimitCPUToMemoryPercent:     200,
 				CPURequestToLimitPercent:    25,
@@ -247,12 +265,15 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 		It("should override resources on init containers", func() {
 			nsName := fmt.Sprintf("cro-init-%d", time.Now().UnixNano())
+
 			By("Creating opt-in namespace")
+
 			err := f.CreateCROOptInNamespace(f.Ctx, nsName)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.CleanupTestNamespace(f.Ctx, nsName) })
 
 			By("Creating pod with init container and regular container")
+
 			pod, err := f.CreatePodWithResourcesAndInit(f.Ctx, "test-init", nsName,
 				[]corev1.Container{{
 					Name:  "app",
@@ -280,12 +301,14 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			DeferCleanup(func() { _ = f.DeletePod(f.Ctx, pod.Name, nsName) })
 
 			By("Logging actual resources")
+
 			for _, c := range pod.Spec.InitContainers {
 				GinkgoWriter.Printf("[Test] init %s: CPU req=%s lim=%s, Mem req=%s lim=%s\n",
 					c.Name,
 					c.Resources.Requests.Cpu().String(), c.Resources.Limits.Cpu().String(),
 					c.Resources.Requests.Memory().String(), c.Resources.Limits.Memory().String())
 			}
+
 			for _, c := range pod.Spec.Containers {
 				GinkgoWriter.Printf("[Test] container %s: CPU req=%s lim=%s, Mem req=%s lim=%s\n",
 					c.Name,
@@ -298,6 +321,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			//   CPU request = 2000 * 25% = 500m
 			//   Mem request = 1024 * 50% = 512Mi
 			By("Verifying init container was overridden by CRO")
+
 			init := findContainer(pod.Spec.InitContainers, "init")
 			Expect(init).NotTo(BeNil(), "init container not found")
 			Expect(init.Resources.Requests.Memory().Value()).To(BeNumerically("<", int64(1024*1024*1024)),
@@ -309,6 +333,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			//   CPU request = 1000 * 25% = 250m
 			//   Mem request = 512 * 50% = 256Mi
 			By("Verifying regular container was also overridden")
+
 			app := findContainer(pod.Spec.Containers, "app")
 			Expect(app).NotTo(BeNil())
 			Expect(app.Resources.Requests.Memory().Value()).To(BeNumerically("<", int64(512*1024*1024)),
@@ -320,9 +345,9 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 	})
 
 	Context("LimitRange with default limits", func() {
-
 		BeforeEach(func() {
 			By("Ensuring ClusterResourceOverride CR exists with standard ratios")
+
 			err := f.CreateClusterResourceOverride(f.Ctx, framework.CROConfig{
 				LimitCPUToMemoryPercent:     200,
 				CPURequestToLimitPercent:    25,
@@ -335,12 +360,15 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 		It("should override resources when limits come from LimitRange defaults", func() {
 			nsName := fmt.Sprintf("cro-lrdef-%d", time.Now().UnixNano())
+
 			By("Creating opt-in namespace")
+
 			err := f.CreateCROOptInNamespace(f.Ctx, nsName)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.CleanupTestNamespace(f.Ctx, nsName) })
 
 			By("Creating LimitRange with default limits: CPU=2000m, Memory=512Mi")
+
 			err = f.CreateLimitRange(f.Ctx, "test-lr-defaults", nsName, corev1.LimitRangeSpec{
 				Limits: []corev1.LimitRangeItem{{
 					Type: corev1.LimitTypeContainer,
@@ -359,6 +387,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			//   CPU request = cpuLimit * 25%
 			//   Mem request = 512 * 50% = 256Mi
 			By("Creating pod WITHOUT resource specifications")
+
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-lrdef", nsName, []corev1.Container{{
 				Name:  "app",
 				Image: "registry.k8s.io/pause:3.9",
@@ -373,22 +402,25 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 				container.Resources.Requests.Memory().String(), container.Resources.Limits.Memory().String())
 
 			By("Verifying pod got limits from LimitRange (memory limit should be 512Mi)")
-			Expect(container.Resources.Limits.Memory().Value()).To(Equal(int64(512 * 1024 * 1024)),
+			Expect(container.Resources.Limits.Memory().Value()).To(Equal(int64(512*1024*1024)),
 				"Memory limit should come from LimitRange default")
 
 			By("Verifying CRO reduced CPU limit from the LimitRange default of 2000m")
+
 			cpuLimit := container.Resources.Limits.Cpu().MilliValue()
 			Expect(cpuLimit).To(BeNumerically("<", 2000),
 				"CRO should reduce CPU limit from LimitRange default of 2000m")
 			Expect(cpuLimit).To(BeNumerically(">", 0))
 
 			By("Verifying CRO set CPU request as a fraction of CPU limit")
+
 			cpuReq := container.Resources.Requests.Cpu().MilliValue()
 			Expect(cpuReq).To(BeNumerically("<", cpuLimit),
 				"CPU request should be a fraction of CPU limit")
 			Expect(cpuReq).To(BeNumerically(">", 0))
 
 			By("Verifying CRO set memory request lower than memory limit")
+
 			memReq := container.Resources.Requests.Memory().Value()
 			Expect(memReq).To(BeNumerically("<", int64(512*1024*1024)),
 				"Memory request should be a fraction of memory limit")
@@ -400,9 +432,9 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 	// No opt-in — CRO should NOT modify pods in unlabeled namespaces
 	Context("No opt-in namespace", func() {
-
 		It("should not modify pod resources in a namespace without the opt-in label", func() {
 			By("Ensuring ClusterResourceOverride CR exists")
+
 			err := f.CreateClusterResourceOverride(f.Ctx, framework.CROConfig{
 				LimitCPUToMemoryPercent:     200,
 				CPURequestToLimitPercent:    50,
@@ -413,12 +445,15 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nsName := fmt.Sprintf("cro-noopt-%d", time.Now().UnixNano())
+
 			By("Creating namespace WITHOUT opt-in label")
+
 			_, err = f.CreateNamespace(f.Ctx, nsName)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.CleanupTestNamespace(f.Ctx, nsName) })
 
 			By("Creating pod — resources should remain unchanged")
+
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-noopt", nsName, []corev1.Container{{
 				Name:  "test",
 				Image: "registry.k8s.io/pause:3.9",
@@ -437,6 +472,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			DeferCleanup(func() { _ = f.DeletePod(f.Ctx, pod.Name, nsName) })
 
 			By("Verifying resources were NOT modified")
+
 			container := findContainer(pod.Spec.Containers, "test")
 			Expect(container).NotTo(BeNil())
 			err = framework.VerifyContainerResources(*container, "100m", "512Mi", "100m", "512Mi")
@@ -447,9 +483,9 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 	// Configuration change — verify new ratios take effect on new pods
 	Context("Configuration change", func() {
-
 		It("should apply new ratios to pods created after config update", func() {
 			By("Setting initial CRO config: LimitCPU=100, CPUReq=10, MemReq=75")
+
 			err := f.CreateClusterResourceOverride(f.Ctx, framework.CROConfig{
 				LimitCPUToMemoryPercent:     100,
 				CPURequestToLimitPercent:    10,
@@ -460,6 +496,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Updating CRO config to: LimitCPU=50, CPUReq=50, MemReq=50")
+
 			err = f.UpdateClusterResourceOverride(f.Ctx, framework.CROConfig{
 				LimitCPUToMemoryPercent:     50,
 				CPURequestToLimitPercent:    50,
@@ -469,11 +506,14 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 			By("Waiting for webhook to reconcile with new config")
 			time.Sleep(30 * time.Second)
+
 			err = f.WaitForClusterResourceOverrideReady(f.Ctx, 3*time.Minute)
 			Expect(err).NotTo(HaveOccurred())
 
 			nsName := fmt.Sprintf("cro-cfgchg-%d", time.Now().UnixNano())
+
 			By("Creating opt-in namespace")
+
 			err = f.CreateCROOptInNamespace(f.Ctx, nsName)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.CleanupTestNamespace(f.Ctx, nsName) })
@@ -483,6 +523,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			//   CPU request:  512 * 50% = 256m
 			//   Mem request:  1024 * 50% = 512Mi
 			By("Creating pod and verifying new ratios apply")
+
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-cfgchg", nsName, []corev1.Container{{
 				Name:  "test",
 				Image: "registry.k8s.io/pause:3.9",
@@ -507,6 +548,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 				container.Resources.Requests.Memory().String(), container.Resources.Limits.Memory().String())
 
 			By("Verifying CRO applied new config (LimitCPU=50 means CPU limit should drop significantly)")
+
 			cpuLimit := container.Resources.Limits.Cpu().MilliValue()
 			Expect(cpuLimit).To(BeNumerically("<", 2000),
 				"CRO should reduce CPU limit from 2000m based on LimitCPUToMemory=50%%")
@@ -525,9 +567,9 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 	// LimitRange interaction — CRO should clamp to namespace LimitRange max
 	Context("LimitRange interaction", func() {
-
 		It("should clamp CPU limit to LimitRange maximum", func() {
 			By("Setting CRO config: LimitCPU=200")
+
 			err := f.CreateClusterResourceOverride(f.Ctx, framework.CROConfig{
 				LimitCPUToMemoryPercent:     200,
 				CPURequestToLimitPercent:    25,
@@ -538,12 +580,15 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nsName := fmt.Sprintf("cro-lr-%d", time.Now().UnixNano())
+
 			By("Creating opt-in namespace")
+
 			err = f.CreateCROOptInNamespace(f.Ctx, nsName)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.CleanupTestNamespace(f.Ctx, nsName) })
 
 			By("Creating LimitRange with CPU max 1500m, memory max 2048Mi")
+
 			err = f.CreateLimitRange(f.Ctx, "test-lr", nsName, corev1.LimitRangeSpec{
 				Limits: []corev1.LimitRangeItem{{
 					Type: corev1.LimitTypeContainer,
@@ -560,6 +605,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			// But min(1500, 2048) → CRO would set 2048m, LimitRange clamps to 1500m
 			// The key check: CPU limit stays <= 1500m (LimitRange max)
 			By("Creating pod with CPU limit at LimitRange max")
+
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-lr", nsName, []corev1.Container{{
 				Name:  "app",
 				Image: "registry.k8s.io/pause:3.9",
@@ -584,17 +630,20 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 				container.Resources.Requests.Memory().String(), container.Resources.Limits.Memory().String())
 
 			By("Verifying CPU limit does not exceed LimitRange max of 1500m")
+
 			cpuLimit := container.Resources.Limits.Cpu().MilliValue()
 			Expect(cpuLimit).To(BeNumerically("<=", 1500),
 				"CPU limit should not exceed LimitRange max of 1500m")
 
 			By("Verifying CPU request does not exceed CPU limit")
+
 			cpuReq := container.Resources.Requests.Cpu().MilliValue()
 			Expect(cpuReq).To(BeNumerically("<=", cpuLimit),
 				"CPU request should not exceed CPU limit")
 			Expect(cpuReq).To(BeNumerically(">", 0))
 
 			By("Verifying memory request does not exceed memory limit")
+
 			memReq := container.Resources.Requests.Memory().Value()
 			Expect(memReq).To(BeNumerically("<=", int64(1024*1024*1024)),
 				"Memory request should not exceed memory limit")
@@ -604,9 +653,9 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 	})
 
 	Context("Deployment verification", func() {
-
 		It("should have the CRO webhook deployment running", func() {
 			By("Checking for ClusterResourceOverride webhook deployment")
+
 			dep, err := f.GetDeployment(f.Ctx, "clusterresourceoverride", framework.CRONamespace)
 			if err != nil {
 				GinkgoWriter.Printf("[Test] Webhook deployment 'clusterresourceoverride' not found, trying alternative names\n")
@@ -633,5 +682,6 @@ func findContainer(containers []corev1.Container, name string) *corev1.Container
 			return &containers[i]
 		}
 	}
+
 	return nil
 }

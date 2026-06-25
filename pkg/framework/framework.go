@@ -23,8 +23,8 @@ import (
 	rt "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ObjectKey is an alias for types.NamespacedName for convenience in tests
+// ObjectKey is an alias for types.NamespacedName for convenience in tests.
 type ObjectKey = types.NamespacedName
 
 // Framework Helpers
@@ -53,6 +53,7 @@ func NewFramework() (*Framework, error) {
 	}
 
 	scheme := newScheme()
+
 	c, err := client.New(config, client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client: %w", err)
@@ -79,6 +80,7 @@ func newScheme() *rt.Scheme {
 	utilruntime.Must(appsv1.AddToScheme(scheme))
 	utilruntime.Must(autoscalingv1.AddToScheme(scheme))
 	utilruntime.Must(autoscalingv2.AddToScheme(scheme))
+
 	return scheme
 }
 
@@ -87,7 +89,9 @@ func getConfig() (*rest.Config, error) {
 	if err == nil {
 		return config, nil
 	}
+
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		rules,
 		&clientcmd.ConfigOverrides{},
@@ -98,6 +102,7 @@ func getNamespace() string {
 	if ns := os.Getenv("TEST_NAMESPACE"); ns != "" {
 		return ns
 	}
+
 	return "default"
 }
 
@@ -111,6 +116,7 @@ func (f *Framework) WithTimeout(timeout time.Duration) context.Context {
 func (f *Framework) GetPod(ctx context.Context, name, namespace string) (*corev1.Pod, error) {
 	pod := &corev1.Pod{}
 	err := f.Client.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, pod)
+
 	return pod, err
 }
 
@@ -120,6 +126,7 @@ func (f *Framework) ListPods(ctx context.Context, namespace string, labelSelecto
 		Namespace:     namespace,
 		LabelSelector: labels.SelectorFromSet(labelSelector),
 	})
+
 	return podList, err
 }
 
@@ -129,6 +136,7 @@ func (f *Framework) WaitForPodReady(ctx context.Context, name, namespace string,
 		if err != nil {
 			return false, nil
 		}
+
 		return isPodReady(pod), nil
 	})
 }
@@ -139,12 +147,15 @@ func (f *Framework) WaitForPodsWithLabel(ctx context.Context, namespace string, 
 		if err != nil {
 			return false, nil
 		}
+
 		readyCount := 0
+
 		for _, pod := range pods.Items {
 			if isPodReady(&pod) {
 				readyCount++
 			}
 		}
+
 		return readyCount >= minReady, nil
 	})
 }
@@ -165,7 +176,9 @@ func (f *Framework) ExecInPod(ctx context.Context, namespace, podName, container
 	}
 
 	var stdout, stderr bytes.Buffer
+
 	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr})
+
 	return stdout.String(), stderr.String(), err
 }
 
@@ -174,13 +187,16 @@ func (f *Framework) GetPodLogs(ctx context.Context, namespace, podName, containe
 		Container: containerName,
 		TailLines: &tailLines,
 	})
+
 	stream, err := req.Stream(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer stream.Close()
+
 	buf := new(bytes.Buffer)
 	_, err = io.Copy(buf, stream)
+
 	return buf.String(), err
 }
 
@@ -192,11 +208,13 @@ func isPodReady(pod *corev1.Pod) bool {
 	if pod.Status.Phase != corev1.PodRunning {
 		return false
 	}
+
 	for _, cond := range pod.Status.Conditions {
 		if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -208,8 +226,10 @@ func (f *Framework) NamespaceExists(ctx context.Context, name string) (bool, err
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		}
+
 		return false, err
 	}
+
 	return true, nil
 }
 
@@ -220,13 +240,16 @@ func (f *Framework) CreateNamespace(ctx context.Context, name string) (*corev1.N
 			Labels: map[string]string{"test-suite": "autoscale-tests"},
 		},
 	}
+
 	err := f.Client.Create(ctx, ns)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return ns, nil
 		}
+
 		return nil, fmt.Errorf("failed to create namespace: %w", err)
 	}
+
 	return ns, nil
 }
 
@@ -237,6 +260,7 @@ func (f *Framework) DeleteNamespace(ctx context.Context, name string) error {
 func (f *Framework) CreateTestNamespace(ctx context.Context, prefix string) (string, error) {
 	name := fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 	_, err := f.CreateNamespace(ctx, name)
+
 	return name, err
 }
 
@@ -244,6 +268,7 @@ func (f *Framework) CleanupTestNamespace(ctx context.Context, name string) error
 	if err := f.DeleteNamespace(ctx, name); err != nil {
 		return err
 	}
+
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		exists, err := f.NamespaceExists(ctx, name)
 		return !exists, err
@@ -263,17 +288,17 @@ type ContainerConfig struct {
 }
 
 type DeploymentConfig struct {
-	Name              string
-	Namespace         string
-	Replicas          int32
-	Image             string
-	Command           []string
-	CPURequest        string
-	MemoryRequest     string
-	CPULimit          string
-	MemoryLimit       string
-	Labels            map[string]string
-	ExtraContainers   []ContainerConfig
+	Name            string
+	Namespace       string
+	Replicas        int32
+	Image           string
+	Command         []string
+	CPURequest      string
+	MemoryRequest   string
+	CPULimit        string
+	MemoryLimit     string
+	Labels          map[string]string
+	ExtraContainers []ContainerConfig
 }
 
 func DefaultDeploymentConfig(name, namespace string) DeploymentConfig {
@@ -294,6 +319,7 @@ func (f *Framework) CreateDeployment(ctx context.Context, cfg DeploymentConfig) 
 	if cfg.Labels == nil {
 		cfg.Labels = map[string]string{"app": cfg.Name}
 	}
+
 	containers := []corev1.Container{{
 		Name:    "test-container",
 		Image:   cfg.Image,
@@ -341,12 +367,14 @@ func (f *Framework) CreateDeployment(ctx context.Context, cfg DeploymentConfig) 
 		},
 	}
 	err := f.Client.Create(ctx, deployment)
+
 	return deployment, err
 }
 
 func (f *Framework) GetDeployment(ctx context.Context, name, namespace string) (*appsv1.Deployment, error) {
 	deployment := &appsv1.Deployment{}
 	err := f.Client.Get(ctx, ObjectKey{Name: name, Namespace: namespace}, deployment)
+
 	return deployment, err
 }
 
@@ -360,6 +388,7 @@ func (f *Framework) WaitForDeploymentReady(ctx context.Context, name, namespace 
 		if err != nil {
 			return false, nil
 		}
+
 		return deployment.Status.ReadyReplicas == *deployment.Spec.Replicas, nil
 	})
 }
@@ -370,6 +399,7 @@ func (f *Framework) WaitForDeploymentReplicas(ctx context.Context, name, namespa
 		if err != nil {
 			return false, nil
 		}
+
 		return deployment.Status.ReadyReplicas >= replicas, nil
 	})
 }
@@ -377,26 +407,27 @@ func (f *Framework) WaitForDeploymentReplicas(ctx context.Context, name, namespa
 // HPA Helpers
 
 type HPAConfig struct {
-	Name                              string
-	Namespace                         string
-	TargetDeployment                  string
-	MinReplicas                       int32
-	MaxReplicas                       int32
-	CPUTargetUtilization              *int32
-	CPUAverageValue                   string
-	MemoryTargetUtilization           *int32
-	MemoryAverageValue                string
+	Name                    string
+	Namespace               string
+	TargetDeployment        string
+	MinReplicas             int32
+	MaxReplicas             int32
+	CPUTargetUtilization    *int32
+	CPUAverageValue         string
+	MemoryTargetUtilization *int32
+	MemoryAverageValue      string
 	// ContainerResource metrics (targets a specific container by name)
-	ContainerName                     string
-	ContainerCPUTargetUtilization     *int32
-	ContainerCPUAverageValue          string
-	ContainerMemoryTargetUtilization  *int32
-	ContainerMemoryAverageValue       string
-	ScaleDownStabilizationWindowSecs  *int32
+	ContainerName                    string
+	ContainerCPUTargetUtilization    *int32
+	ContainerCPUAverageValue         string
+	ContainerMemoryTargetUtilization *int32
+	ContainerMemoryAverageValue      string
+	ScaleDownStabilizationWindowSecs *int32
 }
 
 func DefaultHPAConfig(name, namespace, targetDeployment string) HPAConfig {
 	cpuTarget := int32(50)
+
 	return HPAConfig{
 		Name:                 name,
 		Namespace:            namespace,
@@ -449,6 +480,7 @@ func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv
 			},
 		})
 	}
+
 	if cfg.CPUAverageValue != "" {
 		q := resource.MustParse(cfg.CPUAverageValue)
 		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
@@ -462,6 +494,7 @@ func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv
 			},
 		})
 	}
+
 	if cfg.MemoryTargetUtilization != nil {
 		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
 			Type: autoscalingv2.ResourceMetricSourceType,
@@ -474,6 +507,7 @@ func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv
 			},
 		})
 	}
+
 	if cfg.MemoryAverageValue != "" {
 		q := resource.MustParse(cfg.MemoryAverageValue)
 		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
@@ -492,6 +526,7 @@ func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv
 	if containerName == "" {
 		containerName = "test-container"
 	}
+
 	if cfg.ContainerCPUTargetUtilization != nil {
 		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
 			Type: autoscalingv2.ContainerResourceMetricSourceType,
@@ -505,6 +540,7 @@ func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv
 			},
 		})
 	}
+
 	if cfg.ContainerCPUAverageValue != "" {
 		q := resource.MustParse(cfg.ContainerCPUAverageValue)
 		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
@@ -519,6 +555,7 @@ func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv
 			},
 		})
 	}
+
 	if cfg.ContainerMemoryTargetUtilization != nil {
 		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
 			Type: autoscalingv2.ContainerResourceMetricSourceType,
@@ -532,6 +569,7 @@ func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv
 			},
 		})
 	}
+
 	if cfg.ContainerMemoryAverageValue != "" {
 		q := resource.MustParse(cfg.ContainerMemoryAverageValue)
 		hpa.Spec.Metrics = append(hpa.Spec.Metrics, autoscalingv2.MetricSpec{
@@ -548,12 +586,14 @@ func (f *Framework) CreateHPA(ctx context.Context, cfg HPAConfig) (*autoscalingv
 	}
 
 	err := f.Client.Create(ctx, hpa)
+
 	return hpa, err
 }
 
 func (f *Framework) GetHPA(ctx context.Context, name, namespace string) (*autoscalingv2.HorizontalPodAutoscaler, error) {
 	hpa := &autoscalingv2.HorizontalPodAutoscaler{}
 	err := f.Client.Get(ctx, ObjectKey{Name: name, Namespace: namespace}, hpa)
+
 	return hpa, err
 }
 
@@ -567,6 +607,7 @@ func (f *Framework) WaitForHPAScaleUp(ctx context.Context, hpaName, namespace st
 		if err != nil {
 			return false, nil
 		}
+
 		return hpa.Status.CurrentReplicas > minReplicas, nil
 	})
 }
@@ -577,6 +618,7 @@ func (f *Framework) WaitForHPAScaleDown(ctx context.Context, hpaName, namespace 
 		if err != nil {
 			return false, nil
 		}
+
 		return hpa.Status.CurrentReplicas <= targetReplicas, nil
 	})
 }
@@ -587,9 +629,11 @@ func (f *Framework) WaitForHPAReplicas(ctx context.Context, hpaName, namespace s
 		if err != nil {
 			return false, nil
 		}
+
 		current := hpa.Status.CurrentReplicas
 		fmt.Printf("[HPA] %s: currentReplicas=%d, desiredReplicas=%d, target=%d\n",
 			hpaName, current, hpa.Status.DesiredReplicas, targetReplicas)
+
 		return current == targetReplicas, nil
 	})
 }
@@ -600,9 +644,11 @@ func (f *Framework) WaitForHPAScaleAtLeast(ctx context.Context, hpaName, namespa
 		if err != nil {
 			return false, nil
 		}
+
 		current := hpa.Status.CurrentReplicas
 		fmt.Printf("[HPA] %s: currentReplicas=%d, waiting for >=%d\n",
 			hpaName, current, minReplicas)
+
 		return current >= minReplicas, nil
 	})
 }
@@ -613,9 +659,11 @@ func (f *Framework) WaitForHPAScaleAtMost(ctx context.Context, hpaName, namespac
 		if err != nil {
 			return false, nil
 		}
+
 		current := hpa.Status.CurrentReplicas
 		fmt.Printf("[HPA] %s: currentReplicas=%d, waiting for <=%d\n",
 			hpaName, current, maxReplicas)
+
 		return current <= maxReplicas, nil
 	})
 }
@@ -628,11 +676,14 @@ func (f *Framework) EnsureHPAReplicasInRange(ctx context.Context, hpaName, names
 		if err != nil {
 			return false, nil
 		}
+
 		if hpa.Status.CurrentReplicas > 0 {
 			fmt.Printf("[HPA] %s: became active with %d replicas\n", hpaName, hpa.Status.CurrentReplicas)
 			return true, nil
 		}
+
 		fmt.Printf("[HPA] %s: waiting for CurrentReplicas > 0 (currently %d)\n", hpaName, hpa.Status.CurrentReplicas)
+
 		return false, nil
 	})
 	if err != nil {
@@ -645,12 +696,15 @@ func (f *Framework) EnsureHPAReplicasInRange(ctx context.Context, hpaName, names
 		if err != nil {
 			return fmt.Errorf("failed to get HPA %s: %w", hpaName, err)
 		}
+
 		current := hpa.Status.CurrentReplicas
 		if current < min || current > max {
 			return fmt.Errorf("HPA %s replicas %d out of range [%d, %d]", hpaName, current, min, max)
 		}
+
 		time.Sleep(10 * time.Second)
 	}
+
 	return nil
 }
 
@@ -664,19 +718,22 @@ func (f *Framework) MetricsAPIAvailable(ctx context.Context) (bool, error) {
 
 func (f *Framework) CRDExists(ctx context.Context, group, kind string) (bool, error) {
 	mapper := f.Client.RESTMapper()
+
 	_, err := mapper.RESTMappings(schema.GroupKind{Group: group, Kind: kind})
 	if err != nil {
 		if meta.IsNoMatchError(err) {
 			return false, nil
 		}
+
 		return false, err
 	}
+
 	return true, nil
 }
 
 // Templates
 
-// HPATemplateConfig holds data for rendering hpa_template.yaml
+// HPATemplateConfig holds data for rendering hpa_template.yaml.
 type HPATemplateConfig struct {
 	ResourceName               string
 	Namespace                  string
@@ -687,18 +744,18 @@ type HPATemplateConfig struct {
 	StabilizationWindowSeconds int
 }
 
-// HPAMetric represents a single metric in the HPA template
+// HPAMetric represents a single metric in the HPA template.
 type HPAMetric struct {
 	Name         string
 	AverageValue string
 }
 
-// RenderHPATemplate renders hpa_template.yaml
+// RenderHPATemplate renders hpa_template.yaml.
 func RenderHPATemplate(cfg HPATemplateConfig) (string, error) {
 	return RenderTemplate("hpa_template.yaml", cfg)
 }
 
-// RenderTemplate renders a Go template file from testdata/ with the given data
+// RenderTemplate renders a Go template file from testdata/ with the given data.
 func RenderTemplate(templateFile string, data interface{}) (string, error) {
 	_, filename, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(filename), "..", "..")

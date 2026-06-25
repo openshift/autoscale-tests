@@ -19,7 +19,7 @@ var scaledObjectGVR = schema.GroupVersionResource{
 	Resource: "scaledobjects",
 }
 
-// ScaledObjectTrigger represents a single KEDA trigger
+// ScaledObjectTrigger represents a single KEDA trigger.
 type ScaledObjectTrigger struct {
 	Type       string            // e.g. "cpu", "cron", "memory"
 	MetricType string            // e.g. "Utilization", "AverageValue" (optional, used by cpu/memory)
@@ -52,6 +52,7 @@ func (f *Framework) CreateScaledObject(ctx context.Context, cfg ScaledObjectConf
 		if t.MetricType != "" {
 			trigger["metricType"] = t.MetricType
 		}
+
 		triggers = append(triggers, trigger)
 	}
 
@@ -66,9 +67,11 @@ func (f *Framework) CreateScaledObject(ctx context.Context, cfg ScaledObjectConf
 	if cfg.MinReplicas != nil {
 		spec["minReplicaCount"] = *cfg.MinReplicas
 	}
+
 	if cfg.PollingInterval != nil {
 		spec["pollingInterval"] = *cfg.PollingInterval
 	}
+
 	if cfg.CooldownPeriod != nil {
 		spec["cooldownPeriod"] = *cfg.CooldownPeriod
 	}
@@ -106,7 +109,9 @@ func (f *Framework) CreateScaledObject(ctx context.Context, cfg ScaledObjectConf
 	if err != nil {
 		return fmt.Errorf("failed to create ScaledObject %s/%s: %w", cfg.Namespace, cfg.Name, err)
 	}
+
 	fmt.Printf("[KEDA] ScaledObject %q created in %s\n", result.GetName(), cfg.Namespace)
+
 	return nil
 }
 
@@ -121,6 +126,7 @@ func (f *Framework) DeleteScaledObject(ctx context.Context, name, namespace stri
 	if errors.IsNotFound(err) {
 		return nil
 	}
+
 	return err
 }
 
@@ -138,19 +144,23 @@ func (f *Framework) WaitForScaledObjectReady(ctx context.Context, name, namespac
 		if err != nil {
 			return false, nil
 		}
+
 		conditions, found, _ := unstructured.NestedSlice(so.Object, "status", "conditions")
 		if !found {
 			return false, nil
 		}
+
 		for _, c := range conditions {
 			cond, ok := c.(map[string]interface{})
 			if !ok {
 				continue
 			}
+
 			if cond["type"] == "Ready" && cond["status"] == "True" {
 				return true, nil
 			}
 		}
+
 		return false, nil
 	})
 }
@@ -163,8 +173,10 @@ func (f *Framework) WaitForKEDAScaleUp(ctx context.Context, deploymentName, name
 		if err != nil {
 			return false, nil
 		}
+
 		current := dep.Status.ReadyReplicas
 		fmt.Printf("[KEDA] %s: readyReplicas=%d, waiting for >=%d\n", deploymentName, current, minReplicas)
+
 		return current >= minReplicas, nil
 	})
 }
@@ -177,8 +189,10 @@ func (f *Framework) WaitForKEDAScaleDown(ctx context.Context, deploymentName, na
 		if err != nil {
 			return false, nil
 		}
+
 		current := dep.Status.ReadyReplicas
 		fmt.Printf("[KEDA] %s: readyReplicas=%d, waiting for <=%d\n", deploymentName, current, maxReplicas)
+
 		return current <= maxReplicas, nil
 	})
 }
@@ -191,12 +205,15 @@ func (f *Framework) EnsureDeploymentReplicasStable(ctx context.Context, deployme
 		if err != nil {
 			return fmt.Errorf("failed to get deployment %s: %w", deploymentName, err)
 		}
+
 		current := dep.Status.ReadyReplicas
 		if current < min || current > max {
 			return fmt.Errorf("deployment %s replicas %d out of range [%d, %d]", deploymentName, current, min, max)
 		}
+
 		time.Sleep(10 * time.Second)
 	}
+
 	return nil
 }
 
@@ -207,38 +224,45 @@ func (f *Framework) PauseScaledObject(ctx context.Context, name, namespace strin
 	if err != nil {
 		return fmt.Errorf("failed to get ScaledObject: %w", err)
 	}
+
 	annotations := so.GetAnnotations()
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
+
 	annotations["autoscaling.keda.sh/paused-replicas"] = fmt.Sprintf("%d", pausedReplicas)
 	so.SetAnnotations(annotations)
 	_, err = f.getKedaDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Update(ctx, so, metav1.UpdateOptions{})
+
 	return err
 }
 
-// ResumeScaledObject removes the KEDA pause annotation from a ScaledObject
+// ResumeScaledObject removes the KEDA pause annotation from a ScaledObject.
 func (f *Framework) ResumeScaledObject(ctx context.Context, name, namespace string) error {
 	so, err := f.GetScaledObject(ctx, name, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get ScaledObject: %w", err)
 	}
+
 	annotations := so.GetAnnotations()
 	delete(annotations, "autoscaling.keda.sh/paused-replicas")
 	so.SetAnnotations(annotations)
 	_, err = f.getKedaDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Update(ctx, so, metav1.UpdateOptions{})
+
 	return err
 }
 
-// WaitForDeploymentReplicas waits until a deployment has exactly the specified number of ready replicas
+// WaitForDeploymentReplicas waits until a deployment has exactly the specified number of ready replicas.
 func (f *Framework) WaitForKEDAExactReplicas(ctx context.Context, deploymentName, namespace string, replicas int32, timeout time.Duration) error {
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		dep, err := f.GetDeployment(ctx, deploymentName, namespace)
 		if err != nil {
 			return false, nil
 		}
+
 		current := dep.Status.ReadyReplicas
 		fmt.Printf("[KEDA] %s: readyReplicas=%d, waiting for ==%d\n", deploymentName, current, replicas)
+
 		return current == replicas, nil
 	})
 }
@@ -254,5 +278,6 @@ func toStringInterfaceMap(m map[string]string) map[string]interface{} {
 	for k, v := range m {
 		result[k] = v
 	}
+
 	return result
 }

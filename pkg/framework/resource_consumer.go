@@ -18,7 +18,7 @@ import (
 const (
 	ResourceConsumerImage = "registry.k8s.io/e2e-test-images/resource-consumer:1.13"
 
-	resourceConsumerPort       = 8080
+	resourceConsumerPort        = 8080
 	resourceConsumerServicePort = 80
 
 	consumptionDurationSec = 30
@@ -35,15 +35,15 @@ const (
 
 // ResourceConsumerConfig holds all parameters for deploying a resource-consumer workload.
 type ResourceConsumerConfig struct {
-	Name          string
-	Namespace     string
-	Replicas      int32
-	CPURequest    int64 // millicores
-	MemRequest    int64 // megabytes 
-	MemLimit      int64 // megabytes 
-	InitCPUTotal  int   // millicores — initial CPU consumption across all pods
-	InitMemTotal  int   // megabytes — initial memory consumption across all pods
-	Sidecar       SidecarMode
+	Name         string
+	Namespace    string
+	Replicas     int32
+	CPURequest   int64 // millicores
+	MemRequest   int64 // megabytes
+	MemLimit     int64 // megabytes
+	InitCPUTotal int   // millicores — initial CPU consumption across all pods
+	InitMemTotal int   // megabytes — initial memory consumption across all pods
+	Sidecar      SidecarMode
 }
 
 type ResourceConsumer struct {
@@ -75,9 +75,9 @@ func (f *Framework) CreateResourceConsumer(ctx context.Context, cfg ResourceCons
 	}
 
 	containers := []corev1.Container{{
-		Name:    cfg.Name,
-		Image:   ResourceConsumerImage,
-		Ports:   []corev1.ContainerPort{{ContainerPort: resourceConsumerPort}},
+		Name:  cfg.Name,
+		Image: ResourceConsumerImage,
+		Ports: []corev1.ContainerPort{{ContainerPort: resourceConsumerPort}},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceCPU:    *resource.NewMilliQuantity(cfg.CPURequest, resource.DecimalSI),
@@ -164,6 +164,7 @@ func (f *Framework) CreateResourceConsumer(ctx context.Context, cfg ResourceCons
 	if cfg.InitCPUTotal > 0 {
 		rc.ConsumeCPU(cfg.InitCPUTotal)
 	}
+
 	if cfg.InitMemTotal > 0 {
 		rc.ConsumeMem(cfg.InitMemTotal)
 	}
@@ -199,6 +200,7 @@ func (rc *ResourceConsumer) consumeCPULoop(ctx context.Context) {
 	defer rc.wg.Done()
 
 	millicores := 0
+
 	for {
 		select {
 		case millicores = <-rc.cpu:
@@ -221,6 +223,7 @@ func (rc *ResourceConsumer) consumeMemLoop(ctx context.Context) {
 	defer rc.wg.Done()
 
 	megabytes := 0
+
 	for {
 		select {
 		case megabytes = <-rc.mem:
@@ -258,15 +261,18 @@ func (rc *ResourceConsumer) sendPerPod(ctx context.Context, port int32, endpoint
 				paramName:     strconv.Itoa(totalAmount),
 				"durationSec": strconv.Itoa(consumptionDurationSec + 10),
 			})
+
 		return
 	}
 
 	runningPods := 0
+
 	for _, pod := range pods.Items {
 		if pod.Status.Phase == corev1.PodRunning {
 			runningPods++
 		}
 	}
+
 	if runningPods == 0 {
 		fmt.Printf("[ResourceConsumer] sendPerPod: no running pods, falling back to service proxy\n")
 		rc.sendRequest(ctx, rc.name, resourceConsumerServicePort, endpoint,
@@ -274,20 +280,24 @@ func (rc *ResourceConsumer) sendPerPod(ctx context.Context, port int32, endpoint
 				paramName:     strconv.Itoa(totalAmount),
 				"durationSec": strconv.Itoa(consumptionDurationSec + 10),
 			})
+
 		return
 	}
 
 	perPod := totalAmount / runningPods
 	remainder := totalAmount % runningPods
 	sent := 0
+
 	for _, pod := range pods.Items {
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
+
 		amount := perPod
 		if sent == 0 {
 			amount += remainder
 		}
+
 		sent++
 		req := rc.f.Clientset.CoreV1().RESTClient().Post().
 			Resource("pods").
@@ -297,6 +307,7 @@ func (rc *ResourceConsumer) sendPerPod(ctx context.Context, port int32, endpoint
 			Suffix(endpoint).
 			Param(paramName, strconv.Itoa(amount)).
 			Param("durationSec", strconv.Itoa(consumptionDurationSec+10))
+
 		_, reqErr := req.DoRaw(ctx)
 		if reqErr != nil {
 			fmt.Printf("[ResourceConsumer] sendPerPod %s to %s failed: %v\n", endpoint, pod.Name, reqErr)
@@ -315,6 +326,7 @@ func (rc *ResourceConsumer) sendSidecarConsumeCPU(ctx context.Context, millicore
 		fmt.Printf("[ResourceConsumer] failed to list pods for sidecar CPU request: %v\n", err)
 		return
 	}
+
 	for _, pod := range pods.Items {
 		req := rc.f.Clientset.CoreV1().RESTClient().Post().
 			Resource("pods").
@@ -334,6 +346,7 @@ func (rc *ResourceConsumer) sendSidecarConsumeCPU(ctx context.Context, millicore
 // Retries up to 3 times with 5s backoff. Used as a fallback when per-pod delivery fails.
 func (rc *ResourceConsumer) sendRequest(ctx context.Context, svcName string, port int, path string, params map[string]string) {
 	var lastErr error
+
 	for attempt := 0; attempt < 3; attempt++ {
 		req := rc.f.Clientset.CoreV1().RESTClient().Post().
 			Resource("services").
@@ -344,13 +357,17 @@ func (rc *ResourceConsumer) sendRequest(ctx context.Context, svcName string, por
 		for k, v := range params {
 			req = req.Param(k, v)
 		}
+
 		_, err := req.DoRaw(ctx)
 		if err == nil {
 			return
 		}
+
 		lastErr = err
+
 		time.Sleep(5 * time.Second)
 	}
+
 	fmt.Printf("[ResourceConsumer] %s to %s:%d failed after retries: %v\n", path, svcName, port, lastErr)
 }
 
@@ -361,11 +378,13 @@ func (f *Framework) waitForServiceEndpoints(ctx context.Context, name, namespace
 		if err != nil {
 			return false, nil
 		}
+
 		for _, subset := range endpoints.Subsets {
 			if len(subset.Addresses) > 0 {
 				return true, nil
 			}
 		}
+
 		return false, nil
 	})
 }

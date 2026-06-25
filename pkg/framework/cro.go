@@ -21,14 +21,14 @@ var clusterResourceOverrideGVR = schema.GroupVersionResource{
 	Resource: "clusterresourceoverrides",
 }
 
-// CROConfig holds the override ratios for a ClusterResourceOverride CR
+// CROConfig holds the override ratios for a ClusterResourceOverride CR.
 type CROConfig struct {
 	LimitCPUToMemoryPercent     int64 // CPU limit = memory limit (in Mi) * percent / 100, expressed as millicores
 	CPURequestToLimitPercent    int64 // CPU request = CPU limit * percent / 100
 	MemoryRequestToLimitPercent int64 // Memory request = memory limit * percent / 100
 }
 
-// CreateClusterResourceOverride creates a ClusterResourceOverride CR
+// CreateClusterResourceOverride creates a ClusterResourceOverride CR.
 func (f *Framework) CreateClusterResourceOverride(ctx context.Context, cfg CROConfig) error {
 	cro := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -54,13 +54,16 @@ func (f *Framework) CreateClusterResourceOverride(ctx context.Context, cfg CROCo
 		if errors.IsAlreadyExists(err) {
 			return f.UpdateClusterResourceOverride(ctx, cfg)
 		}
+
 		return fmt.Errorf("failed to create ClusterResourceOverride: %w", err)
 	}
+
 	fmt.Printf("[CRO] ClusterResourceOverride created\n")
+
 	return nil
 }
 
-// UpdateClusterResourceOverride updates the existing ClusterResourceOverride CR with new ratios
+// UpdateClusterResourceOverride updates the existing ClusterResourceOverride CR with new ratios.
 func (f *Framework) UpdateClusterResourceOverride(ctx context.Context, cfg CROConfig) error {
 	cro, err := f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Get(ctx, "cluster", metav1.GetOptions{})
 	if err != nil {
@@ -75,45 +78,52 @@ func (f *Framework) UpdateClusterResourceOverride(ctx context.Context, cfg CROCo
 	if err != nil {
 		return fmt.Errorf("failed to update ClusterResourceOverride: %w", err)
 	}
+
 	fmt.Printf("[CRO] ClusterResourceOverride updated\n")
+
 	return nil
 }
 
-// DeleteClusterResourceOverride removes the ClusterResourceOverride CR
+// DeleteClusterResourceOverride removes the ClusterResourceOverride CR.
 func (f *Framework) DeleteClusterResourceOverride(ctx context.Context) error {
 	err := f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Delete(ctx, "cluster", metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		return nil
 	}
+
 	return err
 }
 
-// WaitForClusterResourceOverrideReady waits until the CRO admission webhook is available
+// WaitForClusterResourceOverrideReady waits until the CRO admission webhook is available.
 func (f *Framework) WaitForClusterResourceOverrideReady(ctx context.Context, timeout time.Duration) error {
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		cro, err := f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Get(ctx, "cluster", metav1.GetOptions{})
 		if err != nil {
 			return false, nil
 		}
+
 		conditions, found, _ := unstructured.NestedSlice(cro.Object, "status", "conditions")
 		if !found {
 			return false, nil
 		}
+
 		for _, c := range conditions {
 			cond, ok := c.(map[string]interface{})
 			if !ok {
 				continue
 			}
+
 			if cond["type"] == "Available" && cond["status"] == "True" {
 				return true, nil
 			}
 		}
+
 		return false, nil
 	})
 }
 
 // CreateCROOptInNamespace creates a namespace with the CRO opt-in label so the
-// admission webhook will mutate pods created in it
+// admission webhook will mutate pods created in it.
 func (f *Framework) CreateCROOptInNamespace(ctx context.Context, name string) error {
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -124,19 +134,21 @@ func (f *Framework) CreateCROOptInNamespace(ctx context.Context, name string) er
 			},
 		},
 	}
+
 	err := f.Client.Create(ctx, ns)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create CRO opt-in namespace: %w", err)
 	}
+
 	return nil
 }
 
-// CreatePodWithResources creates a pod with the specified containers and waits for admission
+// CreatePodWithResources creates a pod with the specified containers and waits for admission.
 func (f *Framework) CreatePodWithResources(ctx context.Context, name, namespace string, containers []corev1.Container) (*corev1.Pod, error) {
 	return f.CreatePodWithResourcesAndInit(ctx, name, namespace, containers, nil)
 }
 
-// CreatePodWithResourcesAndInit creates a pod with containers and optional init containers
+// CreatePodWithResourcesAndInit creates a pod with containers and optional init containers.
 func (f *Framework) CreatePodWithResourcesAndInit(ctx context.Context, name, namespace string, containers, initContainers []corev1.Container) (*corev1.Pod, error) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -157,10 +169,11 @@ func (f *Framework) CreatePodWithResourcesAndInit(ctx context.Context, name, nam
 	if err != nil {
 		return nil, fmt.Errorf("failed to get created pod: %w", err)
 	}
+
 	return created, nil
 }
 
-// CreateLimitRange creates a LimitRange in the specified namespace
+// CreateLimitRange creates a LimitRange in the specified namespace.
 func (f *Framework) CreateLimitRange(ctx context.Context, name, namespace string, spec corev1.LimitRangeSpec) error {
 	lr := &corev1.LimitRange{
 		ObjectMeta: metav1.ObjectMeta{
@@ -169,10 +182,11 @@ func (f *Framework) CreateLimitRange(ctx context.Context, name, namespace string
 		},
 		Spec: spec,
 	}
+
 	return f.Client.Create(ctx, lr)
 }
 
-// VerifyContainerResources checks that a container's actual resources match expected values
+// VerifyContainerResources checks that a container's actual resources match expected values.
 func VerifyContainerResources(container corev1.Container, expectedCPURequest, expectedMemRequest, expectedCPULimit, expectedMemLimit string) error {
 	checks := []struct {
 		name     string
@@ -189,12 +203,14 @@ func VerifyContainerResources(container corev1.Container, expectedCPURequest, ex
 		if c.expected == "" {
 			continue
 		}
+
 		expected := resource.MustParse(c.expected)
 		if !c.actual.Equal(expected) {
 			return fmt.Errorf("container %q %s: got %s, want %s",
 				container.Name, c.name, c.actual.String(), expected.String())
 		}
 	}
+
 	return nil
 }
 

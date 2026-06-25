@@ -30,15 +30,16 @@ var f *framework.Framework
 
 var _ = BeforeSuite(func() {
 	var err error
+
 	f, err = framework.NewFramework()
 	Expect(err).NotTo(HaveOccurred(), "Failed to create framework")
 })
 
 var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
-
 	Context("Prerequisites", func() {
 		It("should have the metrics API available", func() {
 			By("Checking metrics.k8s.io API (required by HPA for pod CPU/memory metrics)")
+
 			available, err := f.MetricsAPIAvailable(f.Ctx)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(available).To(BeTrue(),
@@ -50,7 +51,6 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 	// CPU-based scaling (Pod Resource)
 
 	Describe("CPU-based scaling — Deployment (Pod Resource)", func() {
-
 		It(titleUp+titleAverageUtilization, func() {
 			scaleUp(cpuResource, autoscalingv2.UtilizationMetricType, false)
 		})
@@ -67,7 +67,6 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 	// CPU-based scaling (Container Resource)
 
 	Describe("CPU-based scaling — Deployment (Container Resource)", func() {
-
 		It(titleUp+titleAverageUtilization, func() {
 			scaleUpContainerResource(cpuResource, autoscalingv2.UtilizationMetricType)
 		})
@@ -80,7 +79,6 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 	// Memory-based scaling (Pod Resource)
 
 	Describe("Memory-based scaling — Deployment (Pod Resource)", func() {
-
 		It(titleUp+titleAverageUtilization, func() {
 			scaleUp(memResource, autoscalingv2.UtilizationMetricType, false)
 		})
@@ -93,7 +91,6 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 	// Memory-based scaling (Container Resource)
 
 	Describe("Memory-based scaling — Deployment (Container Resource)", func() {
-
 		It(titleUp+titleAverageUtilization, func() {
 			scaleUpContainerResource(memResource, autoscalingv2.UtilizationMetricType)
 		})
@@ -106,7 +103,6 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 	// Light scaling (1→2, 2→1)
 
 	Describe("Deployment light", func() {
-
 		It("Should scale from 1 pod to 2 pods", func() {
 			st := &HPAScaleTest{
 				initPods:         1,
@@ -141,9 +137,8 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 	})
 
 	// Sidecar tests (ContainerResource use case)
-	
-	Describe("Deployment with idle sidecar (ContainerResource use case)", func() {
 
+	Describe("Deployment with idle sidecar (ContainerResource use case)", func() {
 		It(titleUp+" on a busy application with an idle sidecar container", func() {
 			scaleOnIdleSidecar(cpuResource, autoscalingv2.UtilizationMetricType, false)
 		})
@@ -178,7 +173,9 @@ func (st *HPAScaleTest) run(name string) {
 	var testNamespace string
 
 	By(fmt.Sprintf("Creating test namespace for %q", name))
+
 	var err error
+
 	testNamespace, err = f.CreateTestNamespace(f.Ctx, name)
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(func() {
@@ -188,13 +185,15 @@ func (st *HPAScaleTest) run(name string) {
 	})
 
 	initCPU, initMem := 0, 0
-	if st.resourceType == cpuResource {
+	switch st.resourceType {
+	case cpuResource:
 		initCPU = st.initCPUTotal
-	} else if st.resourceType == memResource {
+	case memResource:
 		initMem = st.initMemTotal
 	}
 
 	By("Creating resource-consumer deployment + service")
+
 	rc, err := f.CreateResourceConsumer(f.Ctx, framework.ResourceConsumerConfig{
 		Name:         name,
 		Namespace:    testNamespace,
@@ -210,6 +209,7 @@ func (st *HPAScaleTest) run(name string) {
 		name, st.initPods, initCPU, initMem)
 
 	By("Creating HPA")
+
 	hpaCfg := buildResourceHPAConfig(name, testNamespace, name, st.resourceType, st.metricTargetType,
 		st.targetValue, st.minPods, st.maxPods)
 	hpa, err := f.CreateHPA(f.Ctx, hpaCfg)
@@ -224,7 +224,9 @@ func (st *HPAScaleTest) run(name string) {
 		By(fmt.Sprintf("Waiting for scale DOWN to at most %d replicas", st.firstScale))
 		err = f.WaitForHPAScaleAtMost(f.Ctx, hpa.Name, testNamespace, st.firstScale, scaleTimeout)
 	}
+
 	Expect(err).NotTo(HaveOccurred(), "HPA should have scaled to %d replicas", st.firstScale)
+
 	currentHPA, _ := f.GetHPA(f.Ctx, hpa.Name, testNamespace)
 	GinkgoWriter.Printf("[Test] HPA at %d replicas\n", currentHPA.Status.CurrentReplicas)
 
@@ -238,24 +240,31 @@ func (st *HPAScaleTest) run(name string) {
 	if st.resourceType == cpuResource && st.cpuBurst > 0 && st.secondScale > 0 {
 		By(fmt.Sprintf("Bursting CPU to %d millicores, expecting scale to %d", st.cpuBurst, st.secondScale))
 		rc.ConsumeCPU(st.cpuBurst)
+
 		if st.secondScale > st.firstScale {
 			err = f.WaitForHPAScaleAtLeast(f.Ctx, hpa.Name, testNamespace, st.secondScale, scaleTimeout)
 		} else {
 			err = f.WaitForHPAScaleAtMost(f.Ctx, hpa.Name, testNamespace, st.secondScale, scaleTimeout)
 		}
+
 		Expect(err).NotTo(HaveOccurred(), "HPA should have scaled to %d after CPU burst", st.secondScale)
+
 		currentHPA, _ = f.GetHPA(f.Ctx, hpa.Name, testNamespace)
 		GinkgoWriter.Printf("[Test] HPA at %d replicas (after burst)\n", currentHPA.Status.CurrentReplicas)
 	}
+
 	if st.resourceType == memResource && st.memBurst > 0 && st.secondScale > 0 {
 		By(fmt.Sprintf("Bursting memory to %d MB, expecting scale to %d", st.memBurst, st.secondScale))
 		rc.ConsumeMem(st.memBurst)
+
 		if st.secondScale > st.firstScale {
 			err = f.WaitForHPAScaleAtLeast(f.Ctx, hpa.Name, testNamespace, st.secondScale, scaleTimeout)
 		} else {
 			err = f.WaitForHPAScaleAtMost(f.Ctx, hpa.Name, testNamespace, st.secondScale, scaleTimeout)
 		}
+
 		Expect(err).NotTo(HaveOccurred(), "HPA should have scaled to %d after mem burst", st.secondScale)
+
 		currentHPA, _ = f.GetHPA(f.Ctx, hpa.Name, testNamespace)
 		GinkgoWriter.Printf("[Test] HPA at %d replicas (after burst)\n", currentHPA.Status.CurrentReplicas)
 	}
@@ -288,7 +297,9 @@ func (st *HPAContainerResourceScaleTest) run(name string) {
 	var testNamespace string
 
 	By(fmt.Sprintf("Creating test namespace for %q", name))
+
 	var err error
+
 	testNamespace, err = f.CreateTestNamespace(f.Ctx, name)
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(func() {
@@ -298,13 +309,15 @@ func (st *HPAContainerResourceScaleTest) run(name string) {
 	})
 
 	initCPU, initMem := 0, 0
-	if st.resourceType == cpuResource {
+	switch st.resourceType {
+	case cpuResource:
 		initCPU = st.initCPUTotal
-	} else if st.resourceType == memResource {
+	case memResource:
 		initMem = st.initMemTotal
 	}
 
 	By("Creating resource-consumer with sidecar")
+
 	rc, err := f.CreateResourceConsumer(f.Ctx, framework.ResourceConsumerConfig{
 		Name:         name,
 		Namespace:    testNamespace,
@@ -319,6 +332,7 @@ func (st *HPAContainerResourceScaleTest) run(name string) {
 	DeferCleanup(rc.CleanUp)
 
 	By("Creating ContainerResource HPA")
+
 	hpaCfg := buildContainerResourceHPAConfig(name, testNamespace, name,
 		st.resourceType, st.metricTargetType, st.targetValue, st.minPods, st.maxPods)
 	hpa, err := f.CreateHPA(f.Ctx, hpaCfg)
@@ -334,6 +348,7 @@ func (st *HPAContainerResourceScaleTest) run(name string) {
 			Expect(err).NotTo(HaveOccurred(), "HPA should not have scaled")
 			GinkgoWriter.Printf("[Test] Confirmed: HPA did not scale\n")
 		}
+
 		return
 	}
 
@@ -345,7 +360,9 @@ func (st *HPAContainerResourceScaleTest) run(name string) {
 		By(fmt.Sprintf("Waiting for scale DOWN to at most %d replicas", st.firstScale))
 		err = f.WaitForHPAScaleAtMost(f.Ctx, hpa.Name, testNamespace, st.firstScale, scaleTimeout)
 	}
+
 	Expect(err).NotTo(HaveOccurred(), "HPA should have scaled to %d replicas", st.firstScale)
+
 	currentHPA, _ := f.GetHPA(f.Ctx, hpa.Name, testNamespace)
 	GinkgoWriter.Printf("[Test] HPA at %d replicas\n", currentHPA.Status.CurrentReplicas)
 
@@ -359,24 +376,31 @@ func (st *HPAContainerResourceScaleTest) run(name string) {
 	if st.resourceType == cpuResource && st.cpuBurst > 0 && st.secondScale > 0 {
 		By(fmt.Sprintf("Bursting CPU to %d, expecting scale to %d", st.cpuBurst, st.secondScale))
 		rc.ConsumeCPU(st.cpuBurst)
+
 		if st.secondScale > st.firstScale {
 			err = f.WaitForHPAScaleAtLeast(f.Ctx, hpa.Name, testNamespace, st.secondScale, scaleTimeout)
 		} else {
 			err = f.WaitForHPAScaleAtMost(f.Ctx, hpa.Name, testNamespace, st.secondScale, scaleTimeout)
 		}
+
 		Expect(err).NotTo(HaveOccurred())
+
 		currentHPA, _ = f.GetHPA(f.Ctx, hpa.Name, testNamespace)
 		GinkgoWriter.Printf("[Test] HPA at %d replicas (after burst)\n", currentHPA.Status.CurrentReplicas)
 	}
+
 	if st.resourceType == memResource && st.memBurst > 0 && st.secondScale > 0 {
 		By(fmt.Sprintf("Bursting memory to %d MB, expecting scale to %d", st.memBurst, st.secondScale))
 		rc.ConsumeMem(st.memBurst)
+
 		if st.secondScale > st.firstScale {
 			err = f.WaitForHPAScaleAtLeast(f.Ctx, hpa.Name, testNamespace, st.secondScale, scaleTimeout)
 		} else {
 			err = f.WaitForHPAScaleAtMost(f.Ctx, hpa.Name, testNamespace, st.secondScale, scaleTimeout)
 		}
+
 		Expect(err).NotTo(HaveOccurred())
+
 		currentHPA, _ = f.GetHPA(f.Ctx, hpa.Name, testNamespace)
 		GinkgoWriter.Printf("[Test] HPA at %d replicas (after burst)\n", currentHPA.Status.CurrentReplicas)
 	}
@@ -387,7 +411,6 @@ func (st *HPAContainerResourceScaleTest) run(name string) {
 func buildResourceHPAConfig(name, namespace, deploymentName string,
 	resourceType corev1.ResourceName, metricTargetType autoscalingv2.MetricTargetType,
 	targetValue, minReplicas, maxReplicas int32) framework.HPAConfig {
-
 	cfg := framework.HPAConfig{
 		Name:             name + "-hpa",
 		Namespace:        namespace,
@@ -413,7 +436,6 @@ func buildResourceHPAConfig(name, namespace, deploymentName string,
 func buildContainerResourceHPAConfig(name, namespace, deploymentName string,
 	resourceType corev1.ResourceName, metricTargetType autoscalingv2.MetricTargetType,
 	targetValue, minReplicas, maxReplicas int32) framework.HPAConfig {
-
 	cfg := framework.HPAConfig{
 		Name:             name + "-hpa",
 		Namespace:        namespace,
@@ -443,6 +465,7 @@ func getTargetValue(avgValue, avgUtilization int32, targetType autoscalingv2.Met
 	if targetType == autoscalingv2.UtilizationMetricType {
 		return avgUtilization
 	}
+
 	return avgValue
 }
 
@@ -451,6 +474,7 @@ func scaleUp(resourceType corev1.ResourceName, metricTargetType autoscalingv2.Me
 	if checkStability {
 		stasis = stabilityWindow
 	}
+
 	st := &HPAScaleTest{
 		initPods:         1,
 		perPodCPURequest: 500,
@@ -468,10 +492,12 @@ func scaleUp(resourceType corev1.ResourceName, metricTargetType autoscalingv2.Me
 		st.initCPUTotal = 250
 		st.cpuBurst = 700
 	}
+
 	if resourceType == memResource {
 		st.initMemTotal = 250
 		st.memBurst = 700
 	}
+
 	st.run("hpa-up-" + string(resourceType))
 }
 
@@ -480,6 +506,7 @@ func scaleDown(resourceType corev1.ResourceName, metricTargetType autoscalingv2.
 	if checkStability {
 		stasis = stabilityWindow
 	}
+
 	st := &HPAScaleTest{
 		initPods:         5,
 		perPodCPURequest: 500,
@@ -497,10 +524,12 @@ func scaleDown(resourceType corev1.ResourceName, metricTargetType autoscalingv2.
 		st.initCPUTotal = 325
 		st.cpuBurst = 10
 	}
+
 	if resourceType == memResource {
 		st.initMemTotal = 325
 		st.memBurst = 10
 	}
+
 	st.run("hpa-down-" + string(resourceType))
 }
 
@@ -522,10 +551,12 @@ func scaleUpContainerResource(resourceType corev1.ResourceName, metricTargetType
 		st.initCPUTotal = 250
 		st.cpuBurst = 700
 	}
+
 	if resourceType == memResource {
 		st.initMemTotal = 250
 		st.memBurst = 700
 	}
+
 	st.run("hpa-container-up-" + string(resourceType))
 }
 
@@ -534,6 +565,7 @@ func scaleOnIdleSidecar(resourceType corev1.ResourceName, metricTargetType autos
 	if checkStability {
 		stasis = stabilityWindow
 	}
+
 	st := &HPAContainerResourceScaleTest{
 		initPods:               1,
 		initCPUTotal:           125,

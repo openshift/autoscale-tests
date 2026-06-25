@@ -41,28 +41,28 @@ const (
 
 // VPAContainerPolicy defines per-container resource policy for a VPA
 type VPAContainerPolicy struct {
-	ContainerName string
-	MinAllowed    map[string]string // e.g. {"cpu": "100m", "memory": "64Mi"}
-	MaxAllowed    map[string]string
-	Mode          string // "Auto" or "Off" (ContainerScalingMode)
+	ContainerName    string
+	MinAllowed       map[string]string // e.g. {"cpu": "100m", "memory": "64Mi"}
+	MaxAllowed       map[string]string
+	Mode             string // "Auto" or "Off" (ContainerScalingMode)
 	ControlledValues string // "RequestsAndLimits" or "RequestsOnly"
 }
 
 // VPAConfig holds parameters for creating a VerticalPodAutoscaler
 type VPAConfig struct {
-	Name             string
-	Namespace        string
-	TargetDeployment string
-	UpdateMode       VPAUpdateMode
-	MinAllowed       map[string]string // global min
-	MaxAllowed       map[string]string // global max
+	Name              string
+	Namespace         string
+	TargetDeployment  string
+	UpdateMode        VPAUpdateMode
+	MinAllowed        map[string]string // global min
+	MaxAllowed        map[string]string // global max
 	ContainerPolicies []VPAContainerPolicy
 }
 
 // EnsureVPAController creates the VerticalPodAutoscalerController CR named
 // "default" in the VPA namespace if it doesn't already exist
 func (f *Framework) EnsureVPAController(ctx context.Context) error {
-	_, err := f.getDynamicClient().Resource(vpaControllerGVR).Namespace(VPANamespace).Get(ctx, "default", metav1.GetOptions{})
+	_, err := f.getCroDynamicClient().Resource(vpaControllerGVR).Namespace(VPANamespace).Get(ctx, "default", metav1.GetOptions{})
 	if err == nil {
 		fmt.Printf("[VPA] VerticalPodAutoscalerController 'default' already exists\n")
 		return nil
@@ -88,7 +88,7 @@ func (f *Framework) EnsureVPAController(ctx context.Context) error {
 		},
 	}
 
-	_, err = f.getDynamicClient().Resource(vpaControllerGVR).Namespace(VPANamespace).Create(ctx, cr, metav1.CreateOptions{})
+	_, err = f.getCroDynamicClient().Resource(vpaControllerGVR).Namespace(VPANamespace).Create(ctx, cr, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
 			return nil
@@ -101,7 +101,7 @@ func (f *Framework) EnsureVPAController(ctx context.Context) error {
 
 // DeleteVPAController removes the VerticalPodAutoscalerController CR
 func (f *Framework) DeleteVPAController(ctx context.Context) error {
-	err := f.getDynamicClient().Resource(vpaControllerGVR).Namespace(VPANamespace).Delete(ctx, "default", metav1.DeleteOptions{})
+	err := f.getCroDynamicClient().Resource(vpaControllerGVR).Namespace(VPANamespace).Delete(ctx, "default", metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		return nil
 	}
@@ -182,7 +182,7 @@ func (f *Framework) CreateVPA(ctx context.Context, cfg VPAConfig) error {
 		},
 	}
 
-	_, err := f.getDynamicClient().Resource(vpaGVR).Namespace(cfg.Namespace).Create(ctx, vpa, metav1.CreateOptions{})
+	_, err := f.getCroDynamicClient().Resource(vpaGVR).Namespace(cfg.Namespace).Create(ctx, vpa, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
 			return nil
@@ -238,12 +238,12 @@ func buildResourcePolicy(cfg VPAConfig) map[string]interface{} {
 
 // GetVPA retrieves a VPA object by name
 func (f *Framework) GetVPA(ctx context.Context, name, namespace string) (*unstructured.Unstructured, error) {
-	return f.getDynamicClient().Resource(vpaGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	return f.getCroDynamicClient().Resource(vpaGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
 // DeleteVPA removes a VPA. Returns nil if already gone
 func (f *Framework) DeleteVPA(ctx context.Context, name, namespace string) error {
-	err := f.getDynamicClient().Resource(vpaGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	err := f.getCroDynamicClient().Resource(vpaGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		return nil
 	}
@@ -252,10 +252,10 @@ func (f *Framework) DeleteVPA(ctx context.Context, name, namespace string) error
 
 // VPARecommendation holds parsed recommendation values for a single container
 type VPARecommendation struct {
-	ContainerName string
-	Target        map[string]string // e.g. {"cpu": "250m", "memory": "200Mi"}
-	LowerBound    map[string]string
-	UpperBound    map[string]string
+	ContainerName  string
+	Target         map[string]string // e.g. {"cpu": "250m", "memory": "200Mi"}
+	LowerBound     map[string]string
+	UpperBound     map[string]string
 	UncappedTarget map[string]string
 }
 
@@ -317,7 +317,7 @@ func (f *Framework) DeleteVPACheckpoints(ctx context.Context, namespace string) 
 		Version:  "v1",
 		Resource: "verticalpodautoscalercheckpoints",
 	}
-	list, err := f.getDynamicClient().Resource(checkpointGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	list, err := f.getCroDynamicClient().Resource(checkpointGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil
@@ -325,7 +325,7 @@ func (f *Framework) DeleteVPACheckpoints(ctx context.Context, namespace string) 
 		return fmt.Errorf("failed to list VPA checkpoints in %s: %w", namespace, err)
 	}
 	for _, cp := range list.Items {
-		if delErr := f.getDynamicClient().Resource(checkpointGVR).Namespace(namespace).Delete(ctx, cp.GetName(), metav1.DeleteOptions{}); delErr != nil {
+		if delErr := f.getCroDynamicClient().Resource(checkpointGVR).Namespace(namespace).Delete(ctx, cp.GetName(), metav1.DeleteOptions{}); delErr != nil {
 			if !errors.IsNotFound(delErr) {
 				fmt.Printf("[VPA] Warning: failed to delete checkpoint %s: %v\n", cp.GetName(), delErr)
 			}
@@ -345,7 +345,7 @@ func (f *Framework) WaitForPodMetricsAvailable(ctx context.Context, namespace st
 	}
 	fmt.Printf("[VPA] Waiting for pod metrics in namespace %s (timeout %s)...\n", namespace, timeout)
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		list, err := f.getDynamicClient().Resource(metricsGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		list, err := f.getCroDynamicClient().Resource(metricsGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return false, nil
 		}
@@ -535,7 +535,7 @@ func (f *Framework) SetVPARecommendation(ctx context.Context, name, namespace st
 		return fmt.Errorf("failed to marshal VPA status patch: %w", err)
 	}
 
-	_, err = f.getDynamicClient().Resource(vpaGVR).Namespace(namespace).Patch(
+	_, err = f.getCroDynamicClient().Resource(vpaGVR).Namespace(namespace).Patch(
 		ctx, name, types.MergePatchType, patchBytes, metav1.PatchOptions{}, "status",
 	)
 	if err != nil {

@@ -49,7 +49,7 @@ func (f *Framework) CreateClusterResourceOverride(ctx context.Context, cfg CROCo
 		},
 	}
 
-	_, err := f.getDynamicClient().Resource(clusterResourceOverrideGVR).Create(ctx, cro, metav1.CreateOptions{})
+	_, err := f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Create(ctx, cro, metav1.CreateOptions{})
 	if err != nil {
 		if errors.IsAlreadyExists(err) {
 			return f.UpdateClusterResourceOverride(ctx, cfg)
@@ -62,7 +62,7 @@ func (f *Framework) CreateClusterResourceOverride(ctx context.Context, cfg CROCo
 
 // UpdateClusterResourceOverride updates the existing ClusterResourceOverride CR with new ratios
 func (f *Framework) UpdateClusterResourceOverride(ctx context.Context, cfg CROConfig) error {
-	cro, err := f.getDynamicClient().Resource(clusterResourceOverrideGVR).Get(ctx, "cluster", metav1.GetOptions{})
+	cro, err := f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Get(ctx, "cluster", metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get ClusterResourceOverride: %w", err)
 	}
@@ -71,7 +71,7 @@ func (f *Framework) UpdateClusterResourceOverride(ctx context.Context, cfg CROCo
 	_ = unstructured.SetNestedField(cro.Object, cfg.CPURequestToLimitPercent, "spec", "podResourceOverride", "spec", "cpuRequestToLimitPercent")
 	_ = unstructured.SetNestedField(cro.Object, cfg.LimitCPUToMemoryPercent, "spec", "podResourceOverride", "spec", "limitCPUToMemoryPercent")
 
-	_, err = f.getDynamicClient().Resource(clusterResourceOverrideGVR).Update(ctx, cro, metav1.UpdateOptions{})
+	_, err = f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Update(ctx, cro, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update ClusterResourceOverride: %w", err)
 	}
@@ -81,7 +81,7 @@ func (f *Framework) UpdateClusterResourceOverride(ctx context.Context, cfg CROCo
 
 // DeleteClusterResourceOverride removes the ClusterResourceOverride CR
 func (f *Framework) DeleteClusterResourceOverride(ctx context.Context) error {
-	err := f.getDynamicClient().Resource(clusterResourceOverrideGVR).Delete(ctx, "cluster", metav1.DeleteOptions{})
+	err := f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Delete(ctx, "cluster", metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		return nil
 	}
@@ -91,7 +91,7 @@ func (f *Framework) DeleteClusterResourceOverride(ctx context.Context) error {
 // WaitForClusterResourceOverrideReady waits until the CRO admission webhook is available
 func (f *Framework) WaitForClusterResourceOverrideReady(ctx context.Context, timeout time.Duration) error {
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		cro, err := f.getDynamicClient().Resource(clusterResourceOverrideGVR).Get(ctx, "cluster", metav1.GetOptions{})
+		cro, err := f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Get(ctx, "cluster", metav1.GetOptions{})
 		if err != nil {
 			return false, nil
 		}
@@ -198,6 +198,6 @@ func VerifyContainerResources(container corev1.Container, expectedCPURequest, ex
 	return nil
 }
 
-func (f *Framework) getDynamicClient() dynamic.Interface {
+func (f *Framework) getCroDynamicClient() dynamic.Interface {
 	return dynamic.NewForConfigOrDie(f.RestConfig)
 }

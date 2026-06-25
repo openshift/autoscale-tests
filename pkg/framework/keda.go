@@ -28,14 +28,14 @@ type ScaledObjectTrigger struct {
 
 // ScaledObjectConfig holds parameters for creating a ScaledObject.
 type ScaledObjectConfig struct {
-	Name             string
-	Namespace        string
-	DeploymentName   string
-	MinReplicas      *int64 // nil = KEDA default (0 for scale-to-zero)
-	MaxReplicas      int64
-	PollingInterval  *int64 // seconds between trigger checks (nil = KEDA default 30s)
-	CooldownPeriod   *int64 // seconds after last trigger before scaling to minReplicas (nil = KEDA default 300s)
-	Triggers         []ScaledObjectTrigger
+	Name            string
+	Namespace       string
+	DeploymentName  string
+	MinReplicas     *int64 // nil = KEDA default (0 for scale-to-zero)
+	MaxReplicas     int64
+	PollingInterval *int64 // seconds between trigger checks (nil = KEDA default 30s)
+	CooldownPeriod  *int64 // seconds after last trigger before scaling to minReplicas (nil = KEDA default 300s)
+	Triggers        []ScaledObjectTrigger
 
 	// HPA behavior overrides (optional)
 	ScaleDownStabilizationSeconds *int64
@@ -102,7 +102,7 @@ func (f *Framework) CreateScaledObject(ctx context.Context, cfg ScaledObjectConf
 		return fmt.Errorf("KEDA API (keda.sh/v1alpha1) not available — is the CMA operator installed? %w", err)
 	}
 
-	result, err := f.getDynamicClient().Resource(scaledObjectGVR).Namespace(cfg.Namespace).Create(ctx, so, metav1.CreateOptions{})
+	result, err := f.getKedaDynamicClient().Resource(scaledObjectGVR).Namespace(cfg.Namespace).Create(ctx, so, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create ScaledObject %s/%s: %w", cfg.Namespace, cfg.Name, err)
 	}
@@ -112,12 +112,12 @@ func (f *Framework) CreateScaledObject(ctx context.Context, cfg ScaledObjectConf
 
 // GetScaledObject retrieves a ScaledObject by name.
 func (f *Framework) GetScaledObject(ctx context.Context, name, namespace string) (*unstructured.Unstructured, error) {
-	return f.getDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	return f.getKedaDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
 // DeleteScaledObject removes a ScaledObject. Returns nil if already gone.
 func (f *Framework) DeleteScaledObject(ctx context.Context, name, namespace string) error {
-	err := f.getDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	err := f.getKedaDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	if errors.IsNotFound(err) {
 		return nil
 	}
@@ -127,7 +127,7 @@ func (f *Framework) DeleteScaledObject(ctx context.Context, name, namespace stri
 // CreateScaledObjectRaw creates a ScaledObject from a raw unstructured map.
 // Useful for validation tests where you need malformed or edge-case objects.
 func (f *Framework) CreateScaledObjectRaw(ctx context.Context, namespace string, obj *unstructured.Unstructured) error {
-	_, err := f.getDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	_, err := f.getKedaDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
 	return err
 }
 
@@ -213,7 +213,7 @@ func (f *Framework) PauseScaledObject(ctx context.Context, name, namespace strin
 	}
 	annotations["autoscaling.keda.sh/paused-replicas"] = fmt.Sprintf("%d", pausedReplicas)
 	so.SetAnnotations(annotations)
-	_, err = f.getDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Update(ctx, so, metav1.UpdateOptions{})
+	_, err = f.getKedaDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Update(ctx, so, metav1.UpdateOptions{})
 	return err
 }
 
@@ -226,7 +226,7 @@ func (f *Framework) ResumeScaledObject(ctx context.Context, name, namespace stri
 	annotations := so.GetAnnotations()
 	delete(annotations, "autoscaling.keda.sh/paused-replicas")
 	so.SetAnnotations(annotations)
-	_, err = f.getDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Update(ctx, so, metav1.UpdateOptions{})
+	_, err = f.getKedaDynamicClient().Resource(scaledObjectGVR).Namespace(namespace).Update(ctx, so, metav1.UpdateOptions{})
 	return err
 }
 
@@ -243,8 +243,8 @@ func (f *Framework) WaitForKEDAExactReplicas(ctx context.Context, deploymentName
 	})
 }
 
-// getDynamicClient returns a dynamic Kubernetes client for working with unstructured resources.
-func (f *Framework) getDynamicClient() dynamic.Interface {
+// getKedaDynamicClient returns a dynamic Kubernetes client for working with unstructured resources.
+func (f *Framework) getKedaDynamicClient() dynamic.Interface {
 	return dynamic.NewForConfigOrDie(f.RestConfig)
 }
 

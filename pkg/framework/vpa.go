@@ -17,6 +17,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	keyContainerName = "containerName"
+	keyCPU           = "cpu"
+	keyMemory        = "memory"
+	vpaRecommender   = "vpa-recommender"
+)
+
 var vpaGVR = schema.GroupVersionResource{
 	Group:    "autoscaling.k8s.io",
 	Version:  "v1",
@@ -74,13 +81,13 @@ func (f *Framework) EnsureVPAController(ctx context.Context) error {
 
 	cr := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "autoscaling.openshift.io/v1",
-			"kind":       "VerticalPodAutoscalerController",
-			"metadata": map[string]interface{}{
-				"name":      "default",
-				"namespace": VPANamespace,
+			keyAPIVersion: "autoscaling.openshift.io/v1",
+			keyKind:       "VerticalPodAutoscalerController",
+			keyMetadata: map[string]interface{}{
+				keyName:      "default",
+				keyNamespace: VPANamespace,
 			},
-			"spec": map[string]interface{}{
+			keySpec: map[string]interface{}{
 				"safetyMarginFraction": "0.15",
 				"podMinCPUMillicores":  int64(25),
 				"podMinMemoryMb":       int64(250),
@@ -121,7 +128,7 @@ func (f *Framework) WaitForVPAComponentsReady(ctx context.Context, timeout time.
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		deps := &appsv1.DeploymentList{}
 		if err := f.Client.List(ctx, deps, &client.ListOptions{Namespace: VPANamespace}); err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		foundRecommender := false
@@ -168,9 +175,9 @@ func (f *Framework) CreateVPA(ctx context.Context, cfg VPAConfig) error {
 
 	spec := map[string]interface{}{
 		"targetRef": map[string]interface{}{
-			"apiVersion": "apps/v1",
-			"kind":       "Deployment",
-			"name":       cfg.TargetDeployment,
+			keyAPIVersion: "apps/v1",
+			keyKind:       "Deployment",
+			keyName:       cfg.TargetDeployment,
 		},
 		"updatePolicy": map[string]interface{}{
 			"updateMode": updateMode,
@@ -184,13 +191,13 @@ func (f *Framework) CreateVPA(ctx context.Context, cfg VPAConfig) error {
 
 	vpa := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "autoscaling.k8s.io/v1",
-			"kind":       "VerticalPodAutoscaler",
-			"metadata": map[string]interface{}{
-				"name":      cfg.Name,
-				"namespace": cfg.Namespace,
+			keyAPIVersion: "autoscaling.k8s.io/v1",
+			keyKind:       "VerticalPodAutoscaler",
+			keyMetadata: map[string]interface{}{
+				keyName:      cfg.Name,
+				keyNamespace: cfg.Namespace,
 			},
-			"spec": spec,
+			keySpec: spec,
 		},
 	}
 
@@ -213,49 +220,56 @@ func buildResourcePolicy(cfg VPAConfig) map[string]interface{} {
 
 	if len(cfg.ContainerPolicies) > 0 {
 		for _, cp := range cfg.ContainerPolicies {
-			policy := map[string]interface{}{}
-			if cp.ContainerName != "" {
-				policy["containerName"] = cp.ContainerName
-			} else {
-				policy["containerName"] = "*"
-			}
-
-			if cp.MinAllowed != nil {
-				policy["minAllowed"] = toStringInterfaceMapVPA(cp.MinAllowed)
-			}
-
-			if cp.MaxAllowed != nil {
-				policy["maxAllowed"] = toStringInterfaceMapVPA(cp.MaxAllowed)
-			}
-
-			if cp.Mode != "" {
-				policy["mode"] = cp.Mode
-			}
-
-			if cp.ControlledValues != "" {
-				policy["controlledValues"] = cp.ControlledValues
-			}
-
-			containerPolicies = append(containerPolicies, policy)
+			containerPolicies = append(containerPolicies, buildContainerPolicy(cp))
 		}
 	} else {
-		policy := map[string]interface{}{
-			"containerName": "*",
-		}
-		if cfg.MinAllowed != nil {
-			policy["minAllowed"] = toStringInterfaceMapVPA(cfg.MinAllowed)
-		}
-
-		if cfg.MaxAllowed != nil {
-			policy["maxAllowed"] = toStringInterfaceMapVPA(cfg.MaxAllowed)
-		}
-
-		containerPolicies = append(containerPolicies, policy)
+		containerPolicies = append(containerPolicies, buildDefaultContainerPolicy(cfg))
 	}
 
 	return map[string]interface{}{
 		"containerPolicies": containerPolicies,
 	}
+}
+
+func buildContainerPolicy(cp VPAContainerPolicy) map[string]interface{} {
+	name := cp.ContainerName
+	if name == "" {
+		name = "*"
+	}
+
+	policy := map[string]interface{}{keyContainerName: name}
+
+	if cp.MinAllowed != nil {
+		policy["minAllowed"] = toStringInterfaceMapVPA(cp.MinAllowed)
+	}
+
+	if cp.MaxAllowed != nil {
+		policy["maxAllowed"] = toStringInterfaceMapVPA(cp.MaxAllowed)
+	}
+
+	if cp.Mode != "" {
+		policy["mode"] = cp.Mode
+	}
+
+	if cp.ControlledValues != "" {
+		policy["controlledValues"] = cp.ControlledValues
+	}
+
+	return policy
+}
+
+func buildDefaultContainerPolicy(cfg VPAConfig) map[string]interface{} {
+	policy := map[string]interface{}{keyContainerName: "*"}
+
+	if cfg.MinAllowed != nil {
+		policy["minAllowed"] = toStringInterfaceMapVPA(cfg.MinAllowed)
+	}
+
+	if cfg.MaxAllowed != nil {
+		policy["maxAllowed"] = toStringInterfaceMapVPA(cfg.MaxAllowed)
+	}
+
+	return policy
 }
 
 // GetVPA retrieves a VPA object by name.
@@ -302,7 +316,7 @@ func (f *Framework) GetVPARecommendations(ctx context.Context, name, namespace s
 			continue
 		}
 
-		containerName, _, _ := unstructured.NestedString(rec, "containerName")
+		containerName, _, _ := unstructured.NestedString(rec, keyContainerName)
 		vr := VPARecommendation{
 			ContainerName:  containerName,
 			Target:         extractResourceMap(rec, "target"),
@@ -383,7 +397,7 @@ func (f *Framework) WaitForPodMetricsAvailable(ctx context.Context, namespace st
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		list, err := f.getCroDynamicClient().Resource(metricsGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		for _, item := range list.Items {
@@ -400,7 +414,7 @@ func (f *Framework) WaitForPodMetricsAvailable(ctx context.Context, namespace st
 
 func (f *Framework) RestartVPARecommender(ctx context.Context, timeout time.Duration) error {
 	namespace := VPANamespace
-	labelSelector := map[string]string{"app": "vpa-recommender"}
+	labelSelector := map[string]string{labelApp: vpaRecommender}
 
 	pods, err := f.ListPods(ctx, namespace, labelSelector)
 	if err != nil {
@@ -410,7 +424,7 @@ func (f *Framework) RestartVPARecommender(ctx context.Context, timeout time.Dura
 	if len(pods.Items) == 0 {
 		fmt.Printf("[VPA] No recommender pods found with label app=vpa-recommender, trying alternative label\n")
 
-		labelSelector = map[string]string{"k8s-app": "vpa-recommender"}
+		labelSelector = map[string]string{labelK8sApp: vpaRecommender}
 
 		pods, err = f.ListPods(ctx, namespace, labelSelector)
 		if err != nil {
@@ -437,7 +451,7 @@ func (f *Framework) RestartVPARecommender(ctx context.Context, timeout time.Dura
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		pods, err := f.ListPods(ctx, namespace, labelSelector)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		for _, pod := range pods.Items {
@@ -466,7 +480,7 @@ func (f *Framework) WaitForVPARecommendation(ctx context.Context, name, namespac
 
 		vpa, err := f.GetVPA(ctx, name, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		recs, found, _ := unstructured.NestedSlice(vpa.Object, "status", "recommendation", "containerRecommendations")
@@ -518,7 +532,7 @@ func (f *Framework) ScaleVPARecommender(ctx context.Context, replicas int32, tim
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		d, err := f.GetDeployment(ctx, depName, VPANamespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		if replicas == 0 {
@@ -532,7 +546,7 @@ func (f *Framework) ScaleVPARecommender(ctx context.Context, replicas int32, tim
 func (f *Framework) findVPARecommenderDeployment(ctx context.Context) (string, error) {
 	candidates := []string{
 		"vpa-recommender-default",
-		"vpa-recommender",
+		vpaRecommender,
 		"vertical-pod-autoscaler-recommender",
 	}
 	for _, name := range candidates {
@@ -566,22 +580,22 @@ func (f *Framework) SetVPARecommendation(ctx context.Context, name, namespace st
 			"recommendation": map[string]interface{}{
 				"containerRecommendations": []interface{}{
 					map[string]interface{}{
-						"containerName": containerName,
+						keyContainerName: containerName,
 						"target": map[string]interface{}{
-							"cpu":    cpuTarget,
-							"memory": memTarget,
+							keyCPU:    cpuTarget,
+							keyMemory: memTarget,
 						},
 						"lowerBound": map[string]interface{}{
-							"cpu":    cpuTarget,
-							"memory": memTarget,
+							keyCPU:    cpuTarget,
+							keyMemory: memTarget,
 						},
 						"upperBound": map[string]interface{}{
-							"cpu":    cpuTarget,
-							"memory": memTarget,
+							keyCPU:    cpuTarget,
+							keyMemory: memTarget,
 						},
 						"uncappedTarget": map[string]interface{}{
-							"cpu":    cpuTarget,
-							"memory": memTarget,
+							keyCPU:    cpuTarget,
+							keyMemory: memTarget,
 						},
 					},
 				},
@@ -606,7 +620,7 @@ func (f *Framework) SetVPARecommendation(ctx context.Context, name, namespace st
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
 		vpa, err := f.GetVPA(ctx, name, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		recs, found, _ := unstructured.NestedSlice(vpa.Object, "status", "recommendation", "containerRecommendations")
@@ -637,7 +651,7 @@ func (f *Framework) WaitForPodEviction(ctx context.Context, namespace string, la
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		pods, err := f.ListPods(ctx, namespace, labelSelector)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		for _, pod := range pods.Items {

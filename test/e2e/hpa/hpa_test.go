@@ -52,7 +52,7 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 
 	Describe("CPU-based scaling — Deployment (Pod Resource)", func() {
 		It(titleUp+titleAverageUtilization, func() {
-			scaleUp(cpuResource, autoscalingv2.UtilizationMetricType, false)
+			scaleUp(cpuResource, autoscalingv2.UtilizationMetricType)
 		})
 
 		It(titleDown+titleAverageUtilization, func() {
@@ -60,7 +60,7 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 		})
 
 		It(titleUp+titleAverageValue, func() {
-			scaleUp(cpuResource, autoscalingv2.AverageValueMetricType, false)
+			scaleUp(cpuResource, autoscalingv2.AverageValueMetricType)
 		})
 	})
 
@@ -80,11 +80,11 @@ var _ = Describe("HPA (Horizontal Pod Autoscaler)", func() {
 
 	Describe("Memory-based scaling — Deployment (Pod Resource)", func() {
 		It(titleUp+titleAverageUtilization, func() {
-			scaleUp(memResource, autoscalingv2.UtilizationMetricType, false)
+			scaleUp(memResource, autoscalingv2.UtilizationMetricType)
 		})
 
 		It(titleUp+titleAverageValue, func() {
-			scaleUp(memResource, autoscalingv2.AverageValueMetricType, false)
+			scaleUp(memResource, autoscalingv2.AverageValueMetricType)
 		})
 	})
 
@@ -185,6 +185,7 @@ func (st *HPAScaleTest) run(name string) {
 	})
 
 	initCPU, initMem := 0, 0
+
 	switch st.resourceType {
 	case cpuResource:
 		initCPU = st.initCPUTotal
@@ -309,6 +310,7 @@ func (st *HPAContainerResourceScaleTest) run(name string) {
 	})
 
 	initCPU, initMem := 0, 0
+
 	switch st.resourceType {
 	case cpuResource:
 		initCPU = st.initCPUTotal
@@ -469,12 +471,7 @@ func getTargetValue(avgValue, avgUtilization int32, targetType autoscalingv2.Met
 	return avgValue
 }
 
-func scaleUp(resourceType corev1.ResourceName, metricTargetType autoscalingv2.MetricTargetType, checkStability bool) {
-	stasis := time.Duration(0)
-	if checkStability {
-		stasis = stabilityWindow
-	}
-
+func scaleUp(resourceType corev1.ResourceName, metricTargetType autoscalingv2.MetricTargetType) {
 	st := &HPAScaleTest{
 		initPods:         1,
 		perPodCPURequest: 500,
@@ -483,7 +480,7 @@ func scaleUp(resourceType corev1.ResourceName, metricTargetType autoscalingv2.Me
 		minPods:          1,
 		maxPods:          5,
 		firstScale:       3,
-		firstScaleStasis: stasis,
+		firstScaleStasis: time.Duration(0),
 		secondScale:      5,
 		resourceType:     resourceType,
 		metricTargetType: metricTargetType,

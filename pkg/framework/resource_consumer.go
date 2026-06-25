@@ -376,7 +376,7 @@ func (f *Framework) waitForServiceEndpoints(ctx context.Context, name, namespace
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		endpoints, err := f.Clientset.CoreV1().Endpoints(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		for _, subset := range endpoints.Subsets {

@@ -15,7 +15,7 @@ import (
 
 var scaledObjectGVR = schema.GroupVersionResource{
 	Group:    "keda.sh",
-	Version:  "v1alpha1",
+	Version:  apiV1alpha1,
 	Resource: "scaledobjects",
 }
 
@@ -46,8 +46,8 @@ func (f *Framework) CreateScaledObject(ctx context.Context, cfg ScaledObjectConf
 	triggers := make([]interface{}, 0, len(cfg.Triggers))
 	for _, t := range cfg.Triggers {
 		trigger := map[string]interface{}{
-			"type":     t.Type,
-			"metadata": toStringInterfaceMap(t.Metadata),
+			"type":      t.Type,
+			keyMetadata: toStringInterfaceMap(t.Metadata),
 		}
 		if t.MetricType != "" {
 			trigger["metricType"] = t.MetricType
@@ -58,7 +58,7 @@ func (f *Framework) CreateScaledObject(ctx context.Context, cfg ScaledObjectConf
 
 	spec := map[string]interface{}{
 		"scaleTargetRef": map[string]interface{}{
-			"name": cfg.DeploymentName,
+			keyName: cfg.DeploymentName,
 		},
 		"maxReplicaCount": cfg.MaxReplicas,
 		"triggers":        triggers,
@@ -90,13 +90,13 @@ func (f *Framework) CreateScaledObject(ctx context.Context, cfg ScaledObjectConf
 
 	so := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "keda.sh/v1alpha1",
-			"kind":       "ScaledObject",
-			"metadata": map[string]interface{}{
-				"name":      cfg.Name,
-				"namespace": cfg.Namespace,
+			keyAPIVersion: "keda.sh/v1alpha1",
+			keyKind:       "ScaledObject",
+			keyMetadata: map[string]interface{}{
+				keyName:      cfg.Name,
+				keyNamespace: cfg.Namespace,
 			},
-			"spec": spec,
+			keySpec: spec,
 		},
 	}
 
@@ -142,7 +142,7 @@ func (f *Framework) WaitForScaledObjectReady(ctx context.Context, name, namespac
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		so, err := f.GetScaledObject(ctx, name, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		conditions, found, _ := unstructured.NestedSlice(so.Object, "status", "conditions")
@@ -171,7 +171,7 @@ func (f *Framework) WaitForKEDAScaleUp(ctx context.Context, deploymentName, name
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		dep, err := f.GetDeployment(ctx, deploymentName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		current := dep.Status.ReadyReplicas
@@ -187,7 +187,7 @@ func (f *Framework) WaitForKEDAScaleDown(ctx context.Context, deploymentName, na
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		dep, err := f.GetDeployment(ctx, deploymentName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		current := dep.Status.ReadyReplicas
@@ -197,8 +197,8 @@ func (f *Framework) WaitForKEDAScaleDown(ctx context.Context, deploymentName, na
 	})
 }
 
-// EnsureDeploymentReplicasStable verifies the replica count stays within [min, max] for duration.
-func (f *Framework) EnsureDeploymentReplicasStable(ctx context.Context, deploymentName, namespace string, min, max int32, duration time.Duration) error {
+// EnsureDeploymentReplicasStable verifies the replica count stays within [minReplicas, maxReplicas] for duration.
+func (f *Framework) EnsureDeploymentReplicasStable(ctx context.Context, deploymentName, namespace string, minReplicas, maxReplicas int32, duration time.Duration) error {
 	deadline := time.Now().Add(duration)
 	for time.Now().Before(deadline) {
 		dep, err := f.GetDeployment(ctx, deploymentName, namespace)
@@ -207,8 +207,8 @@ func (f *Framework) EnsureDeploymentReplicasStable(ctx context.Context, deployme
 		}
 
 		current := dep.Status.ReadyReplicas
-		if current < min || current > max {
-			return fmt.Errorf("deployment %s replicas %d out of range [%d, %d]", deploymentName, current, min, max)
+		if current < minReplicas || current > maxReplicas {
+			return fmt.Errorf("deployment %s replicas %d out of range [%d, %d]", deploymentName, current, minReplicas, maxReplicas)
 		}
 
 		time.Sleep(10 * time.Second)
@@ -257,7 +257,7 @@ func (f *Framework) WaitForKEDAExactReplicas(ctx context.Context, deploymentName
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		dep, err := f.GetDeployment(ctx, deploymentName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		current := dep.Status.ReadyReplicas

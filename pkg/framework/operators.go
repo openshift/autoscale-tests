@@ -35,12 +35,12 @@ func (f *Framework) InstallOperator(ctx context.Context, opts OperatorInstallOpt
 
 	subscription := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "operators.coreos.com/v1alpha1",
-			"kind":       "Subscription",
-			"metadata":   map[string]interface{}{"name": opts.Name, "namespace": opts.Namespace},
-			"spec": map[string]interface{}{
+			keyAPIVersion: "operators.coreos.com/v1alpha1",
+			keyKind:       kindSubscription,
+			keyMetadata:   map[string]interface{}{keyName: opts.Name, keyNamespace: opts.Namespace},
+			keySpec: map[string]interface{}{
 				"channel":             opts.Channel,
-				"name":                opts.Name,
+				keyName:               opts.Name,
 				"source":              opts.CatalogSource,
 				"sourceNamespace":     opts.CatalogSourceNS,
 				"installPlanApproval": opts.InstallPlanApproval,
@@ -48,7 +48,9 @@ func (f *Framework) InstallOperator(ctx context.Context, opts OperatorInstallOpt
 		},
 	}
 	if opts.StartingCSV != "" {
-		subscription.Object["spec"].(map[string]interface{})["startingCSV"] = opts.StartingCSV
+		if err := unstructured.SetNestedField(subscription.Object, opts.StartingCSV, "spec", "startingCSV"); err != nil {
+			return fmt.Errorf("failed to set startingCSV: %w", err)
+		}
 	}
 
 	if err := f.Client.Create(ctx, subscription); err != nil {
@@ -58,18 +60,9 @@ func (f *Framework) InstallOperator(ctx context.Context, opts OperatorInstallOpt
 	return nil
 }
 
-func (f *Framework) ensureOperatorGroup(ctx context.Context, namespace string) error {
-	return f.ensureOperatorGroupWithMode(ctx, namespace, false)
-}
-
-// ensureOperatorGroupAllNamespaces creates an OperatorGroup that watches all namespaces.
-func (f *Framework) ensureOperatorGroupAllNamespaces(ctx context.Context, namespace string) error {
-	return f.ensureOperatorGroupWithMode(ctx, namespace, true)
-}
-
 func (f *Framework) ensureOperatorGroupWithMode(ctx context.Context, namespace string, allNamespaces bool) error {
 	ogList := &unstructured.UnstructuredList{}
-	ogList.SetGroupVersionKind(schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1", Kind: "OperatorGroupList"})
+	ogList.SetGroupVersionKind(schema.GroupVersionKind{Group: operatorsAPIGroup, Version: "v1", Kind: "OperatorGroupList"})
 
 	if err := f.Client.List(ctx, ogList, client.InNamespace(namespace)); err != nil {
 		return err
@@ -100,10 +93,10 @@ func (f *Framework) ensureOperatorGroupWithMode(ctx context.Context, namespace s
 
 	og := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "operators.coreos.com/v1",
-			"kind":       "OperatorGroup",
-			"metadata":   map[string]interface{}{"name": namespace + "-og", "namespace": namespace},
-			"spec":       spec,
+			keyAPIVersion: "operators.coreos.com/v1",
+			keyKind:       "OperatorGroup",
+			keyMetadata:   map[string]interface{}{keyName: namespace + "-og", keyNamespace: namespace},
+			keySpec:       spec,
 		},
 	}
 
@@ -112,7 +105,7 @@ func (f *Framework) ensureOperatorGroupWithMode(ctx context.Context, namespace s
 
 func (f *Framework) UninstallOperator(ctx context.Context, name, namespace string) error {
 	subscription := &unstructured.Unstructured{}
-	subscription.SetGroupVersionKind(schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "Subscription"})
+	subscription.SetGroupVersionKind(schema.GroupVersionKind{Group: operatorsAPIGroup, Version: apiV1alpha1, Kind: kindSubscription})
 	subscription.SetName(name)
 	subscription.SetNamespace(namespace)
 
@@ -121,7 +114,7 @@ func (f *Framework) UninstallOperator(ctx context.Context, name, namespace strin
 	}
 
 	csvList := &unstructured.UnstructuredList{}
-	csvList.SetGroupVersionKind(schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "ClusterServiceVersionList"})
+	csvList.SetGroupVersionKind(schema.GroupVersionKind{Group: operatorsAPIGroup, Version: apiV1alpha1, Kind: "ClusterServiceVersionList"})
 
 	if err := f.Client.List(ctx, csvList, client.InNamespace(namespace)); err != nil {
 		return fmt.Errorf("failed to list CSVs: %w", err)
@@ -139,10 +132,10 @@ func (f *Framework) UninstallOperator(ctx context.Context, name, namespace strin
 func (f *Framework) WaitForOperatorCSVReady(ctx context.Context, namespace string, timeout time.Duration) error {
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		csvList := &unstructured.UnstructuredList{}
-		csvList.SetGroupVersionKind(schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "ClusterServiceVersionList"})
+		csvList.SetGroupVersionKind(schema.GroupVersionKind{Group: operatorsAPIGroup, Version: apiV1alpha1, Kind: "ClusterServiceVersionList"})
 
 		if err := f.Client.List(ctx, csvList, client.InNamespace(namespace)); err != nil || len(csvList.Items) == 0 {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		for _, csv := range csvList.Items {
@@ -158,7 +151,7 @@ func (f *Framework) WaitForOperatorCSVReady(ctx context.Context, namespace strin
 
 func (f *Framework) GetSubscription(ctx context.Context, name, namespace string) (*unstructured.Unstructured, error) {
 	subscription := &unstructured.Unstructured{}
-	subscription.SetGroupVersionKind(schema.GroupVersionKind{Group: "operators.coreos.com", Version: "v1alpha1", Kind: "Subscription"})
+	subscription.SetGroupVersionKind(schema.GroupVersionKind{Group: operatorsAPIGroup, Version: apiV1alpha1, Kind: kindSubscription})
 	err := f.Client.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, subscription)
 
 	return subscription, err
@@ -187,6 +180,26 @@ const (
 	AutoNodeNamespace = "openshift-machine-api"
 )
 
+// Common unstructured object map keys used across the framework package.
+const (
+	keyAPIVersion = "apiVersion"
+	keyKind       = "kind"
+	keyMetadata   = "metadata"
+	keyName       = "name"
+	keyNamespace  = "namespace"
+	keySpec       = "spec"
+	labelApp      = "app"
+	labelK8sApp   = "k8s-app"
+	apiV1alpha1   = "v1alpha1"
+
+	operatorsAPIGroup      = "operators.coreos.com"
+	kindSubscription       = "Subscription"
+	catalogRedHatOperators = "redhat-operators"
+	channelStable          = "stable"
+	kedaOperator           = "keda-operator"
+	kedaMetricsAPIServer   = "keda-metrics-apiserver"
+)
+
 // OperatorInfo contains information about an operator.
 type OperatorInfo struct {
 	Name          string
@@ -203,47 +216,47 @@ var Operators = map[string]OperatorInfo{
 	"vpa": {
 		Name:          "vertical-pod-autoscaler-operator",
 		Namespace:     VPANamespace,
-		Labels:        map[string]string{"k8s-app": "vertical-pod-autoscaler-operator"},
+		Labels:        map[string]string{labelK8sApp: "vertical-pod-autoscaler-operator"},
 		PackageName:   "vertical-pod-autoscaler",
-		CatalogSource: "redhat-operators",
-		Channel:       "stable",
+		CatalogSource: catalogRedHatOperators,
+		Channel:       channelStable,
 	},
 	"cas": {
 		Name:          "cluster-autoscaler-operator",
 		Namespace:     CASNamespace,
-		Labels:        map[string]string{"k8s-app": "cluster-autoscaler-operator"},
+		Labels:        map[string]string{labelK8sApp: "cluster-autoscaler-operator"},
 		PackageName:   "cluster-autoscaler",
-		CatalogSource: "redhat-operators",
-		Channel:       "stable",
+		CatalogSource: catalogRedHatOperators,
+		Channel:       channelStable,
 	},
 	"cro": {
 		Name:          "clusterresourceoverride-operator",
 		Namespace:     CRONamespace,
 		Labels:        map[string]string{"clusterresourceoverride.operator": "true"},
 		PackageName:   "clusterresourceoverride",
-		CatalogSource: "redhat-operators",
-		Channel:       "stable",
+		CatalogSource: catalogRedHatOperators,
+		Channel:       channelStable,
 	},
 	"cma": {
 		Name:          "custom-metrics-autoscaler-operator",
 		Namespace:     CMANamespace,
 		PodsNamespace: "",
-		Labels:        map[string]string{"name": "custom-metrics-autoscaler-operator"},
+		Labels:        map[string]string{keyName: "custom-metrics-autoscaler-operator"},
 		PackageName:   "openshift-custom-metrics-autoscaler-operator",
-		CatalogSource: "redhat-operators",
-		Channel:       "stable",
+		CatalogSource: catalogRedHatOperators,
+		Channel:       channelStable,
 	},
 
 	// KEDA sub-components installed by CMA operator
-	"keda-operator": {
-		Name:      "keda-operator",
+	kedaOperator: {
+		Name:      kedaOperator,
 		Namespace: CMANamespace,
-		Labels:    map[string]string{"app": "keda-operator"},
+		Labels:    map[string]string{labelApp: kedaOperator},
 	},
-	"keda-metrics-apiserver": {
-		Name:      "keda-metrics-apiserver",
+	kedaMetricsAPIServer: {
+		Name:      kedaMetricsAPIServer,
 		Namespace: CMANamespace,
-		Labels:    map[string]string{"app": "keda-metrics-apiserver"},
+		Labels:    map[string]string{labelApp: kedaMetricsAPIServer},
 	},
 	"keda-admission": {
 		Name:      "keda-admission-webhooks",

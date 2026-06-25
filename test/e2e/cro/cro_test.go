@@ -15,6 +15,11 @@ import (
 var f *framework.Framework
 var operatorInstalledByTest bool
 
+const (
+	containerApp = "app"
+	pauseImage   = "registry.k8s.io/pause:3.9"
+)
+
 var _ = BeforeSuite(func() {
 	var err error
 
@@ -123,8 +128,8 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			By("Creating pod with resource requests and limits")
 
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-single", nsName, []corev1.Container{{
-				Name:  "app",
-				Image: "registry.k8s.io/pause:3.9",
+				Name:  containerApp,
+				Image: pauseImage,
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceMemory: resource.MustParse("512Mi"),
@@ -139,7 +144,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeletePod(f.Ctx, pod.Name, nsName) })
 
-			container := findContainer(pod.Spec.Containers, "app")
+			container := findContainer(pod.Spec.Containers, containerApp)
 			Expect(container).NotTo(BeNil(), "container 'app' not found")
 			GinkgoWriter.Printf("[Test] Actual resources: CPU req=%s lim=%s, Mem req=%s lim=%s\n",
 				container.Resources.Requests.Cpu().String(), container.Resources.Limits.Cpu().String(),
@@ -186,7 +191,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-multi", nsName, []corev1.Container{
 				{
 					Name:  "db",
-					Image: "registry.k8s.io/pause:3.9",
+					Image: pauseImage,
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("1024Mi"),
@@ -199,8 +204,8 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 					},
 				},
 				{
-					Name:  "app",
-					Image: "registry.k8s.io/pause:3.9",
+					Name:  containerApp,
+					Image: pauseImage,
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("512Mi"),
@@ -236,7 +241,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 			By("Verifying 'app' container: CRO lowered CPU limit and set requests")
 
-			app := findContainer(pod.Spec.Containers, "app")
+			app := findContainer(pod.Spec.Containers, containerApp)
 			Expect(app).NotTo(BeNil())
 			Expect(app.Resources.Limits.Cpu().MilliValue()).To(BeNumerically("<", 2000),
 				"app CPU limit should be reduced from 2000m")
@@ -276,8 +281,8 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 			pod, err := f.CreatePodWithResourcesAndInit(f.Ctx, "test-init", nsName,
 				[]corev1.Container{{
-					Name:  "app",
-					Image: "registry.k8s.io/pause:3.9",
+					Name:  containerApp,
+					Image: pauseImage,
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("512Mi"),
@@ -287,7 +292,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 				}},
 				[]corev1.Container{{
 					Name:    "init",
-					Image:   "registry.k8s.io/pause:3.9",
+					Image:   pauseImage,
 					Command: []string{"sh", "-c", "echo init && sleep 1"},
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
@@ -334,7 +339,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			//   Mem request = 512 * 50% = 256Mi
 			By("Verifying regular container was also overridden")
 
-			app := findContainer(pod.Spec.Containers, "app")
+			app := findContainer(pod.Spec.Containers, containerApp)
 			Expect(app).NotTo(BeNil())
 			Expect(app.Resources.Requests.Memory().Value()).To(BeNumerically("<", int64(512*1024*1024)),
 				"app memory request should be a fraction of memory limit")
@@ -389,13 +394,13 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			By("Creating pod WITHOUT resource specifications")
 
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-lrdef", nsName, []corev1.Container{{
-				Name:  "app",
-				Image: "registry.k8s.io/pause:3.9",
+				Name:  containerApp,
+				Image: pauseImage,
 			}})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeletePod(f.Ctx, pod.Name, nsName) })
 
-			container := findContainer(pod.Spec.Containers, "app")
+			container := findContainer(pod.Spec.Containers, containerApp)
 			Expect(container).NotTo(BeNil())
 			GinkgoWriter.Printf("[Test] Actual resources: CPU req=%s lim=%s, Mem req=%s lim=%s\n",
 				container.Resources.Requests.Cpu().String(), container.Resources.Limits.Cpu().String(),
@@ -456,7 +461,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-noopt", nsName, []corev1.Container{{
 				Name:  "test",
-				Image: "registry.k8s.io/pause:3.9",
+				Image: pauseImage,
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						corev1.ResourceMemory: resource.MustParse("512Mi"),
@@ -526,7 +531,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-cfgchg", nsName, []corev1.Container{{
 				Name:  "test",
-				Image: "registry.k8s.io/pause:3.9",
+				Image: pauseImage,
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceMemory: resource.MustParse("1024Mi"),
@@ -607,8 +612,8 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			By("Creating pod with CPU limit at LimitRange max")
 
 			pod, err := f.CreatePodWithResources(f.Ctx, "test-lr", nsName, []corev1.Container{{
-				Name:  "app",
-				Image: "registry.k8s.io/pause:3.9",
+				Name:  containerApp,
+				Image: pauseImage,
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceMemory: resource.MustParse("1024Mi"),
@@ -623,7 +628,7 @@ var _ = Describe("Cluster Resource Override Operator", func() {
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeletePod(f.Ctx, pod.Name, nsName) })
 
-			container := findContainer(pod.Spec.Containers, "app")
+			container := findContainer(pod.Spec.Containers, containerApp)
 			Expect(container).NotTo(BeNil())
 			GinkgoWriter.Printf("[Test] Actual resources: CPU req=%s lim=%s, Mem req=%s lim=%s\n",
 				container.Resources.Requests.Cpu().String(), container.Resources.Limits.Cpu().String(),

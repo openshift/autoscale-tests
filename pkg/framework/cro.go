@@ -32,12 +32,12 @@ type CROConfig struct {
 func (f *Framework) CreateClusterResourceOverride(ctx context.Context, cfg CROConfig) error {
 	cro := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "operator.autoscaling.openshift.io/v1",
-			"kind":       "ClusterResourceOverride",
-			"metadata": map[string]interface{}{
-				"name": "cluster",
+			keyAPIVersion: "operator.autoscaling.openshift.io/v1",
+			keyKind:       "ClusterResourceOverride",
+			keyMetadata: map[string]interface{}{
+				keyName: "cluster",
 			},
-			"spec": map[string]interface{}{
+			keySpec: map[string]interface{}{
 				"podResourceOverride": map[string]interface{}{
 					"spec": map[string]interface{}{
 						"memoryRequestToLimitPercent": cfg.MemoryRequestToLimitPercent,
@@ -99,7 +99,7 @@ func (f *Framework) WaitForClusterResourceOverrideReady(ctx context.Context, tim
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		cro, err := f.getCroDynamicClient().Resource(clusterResourceOverrideGVR).Get(ctx, "cluster", metav1.GetOptions{})
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		conditions, found, _ := unstructured.NestedSlice(cro.Object, "status", "conditions")

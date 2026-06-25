@@ -106,9 +106,8 @@ func getNamespace() string {
 	return "default"
 }
 
-func (f *Framework) WithTimeout(timeout time.Duration) context.Context {
-	ctx, _ := context.WithTimeout(f.Ctx, timeout)
-	return ctx
+func (f *Framework) WithTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(f.Ctx, timeout)
 }
 
 // Pod Helpers
@@ -134,7 +133,7 @@ func (f *Framework) WaitForPodReady(ctx context.Context, name, namespace string,
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		pod, err := f.GetPod(ctx, name, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		return isPodReady(pod), nil
@@ -145,7 +144,7 @@ func (f *Framework) WaitForPodsWithLabel(ctx context.Context, namespace string, 
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		pods, err := f.ListPods(ctx, namespace, labelSelector)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		readyCount := 0
@@ -311,7 +310,7 @@ func DefaultDeploymentConfig(name, namespace string) DeploymentConfig {
 		MemoryRequest: "64Mi",
 		CPULimit:      "100m",
 		MemoryLimit:   "128Mi",
-		Labels:        map[string]string{"app": name},
+		Labels:        map[string]string{labelApp: name},
 	}
 }
 
@@ -386,7 +385,7 @@ func (f *Framework) WaitForDeploymentReady(ctx context.Context, name, namespace 
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		deployment, err := f.GetDeployment(ctx, name, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		return deployment.Status.ReadyReplicas == *deployment.Spec.Replicas, nil
@@ -397,7 +396,7 @@ func (f *Framework) WaitForDeploymentReplicas(ctx context.Context, name, namespa
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		deployment, err := f.GetDeployment(ctx, name, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		return deployment.Status.ReadyReplicas >= replicas, nil
@@ -605,7 +604,7 @@ func (f *Framework) WaitForHPAScaleUp(ctx context.Context, hpaName, namespace st
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		hpa, err := f.GetHPA(ctx, hpaName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		return hpa.Status.CurrentReplicas > minReplicas, nil
@@ -616,7 +615,7 @@ func (f *Framework) WaitForHPAScaleDown(ctx context.Context, hpaName, namespace 
 	return wait.PollUntilContextTimeout(ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		hpa, err := f.GetHPA(ctx, hpaName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		return hpa.Status.CurrentReplicas <= targetReplicas, nil
@@ -627,7 +626,7 @@ func (f *Framework) WaitForHPAReplicas(ctx context.Context, hpaName, namespace s
 	return wait.PollUntilContextTimeout(ctx, 20*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		hpa, err := f.GetHPA(ctx, hpaName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		current := hpa.Status.CurrentReplicas
@@ -642,7 +641,7 @@ func (f *Framework) WaitForHPAScaleAtLeast(ctx context.Context, hpaName, namespa
 	return wait.PollUntilContextTimeout(ctx, 20*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		hpa, err := f.GetHPA(ctx, hpaName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		current := hpa.Status.CurrentReplicas
@@ -657,7 +656,7 @@ func (f *Framework) WaitForHPAScaleAtMost(ctx context.Context, hpaName, namespac
 	return wait.PollUntilContextTimeout(ctx, 20*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		hpa, err := f.GetHPA(ctx, hpaName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		current := hpa.Status.CurrentReplicas
@@ -668,13 +667,13 @@ func (f *Framework) WaitForHPAScaleAtMost(ctx context.Context, hpaName, namespac
 	})
 }
 
-func (f *Framework) EnsureHPAReplicasInRange(ctx context.Context, hpaName, namespace string, min, max int32, duration time.Duration) error {
+func (f *Framework) EnsureHPAReplicasInRange(ctx context.Context, hpaName, namespace string, minReplicas, maxReplicas int32, duration time.Duration) error {
 	// Wait for HPA to become active (CurrentReplicas > 0) before checking stability.
 	// HPA controller needs time to read metrics and set CurrentReplicas.
 	err := wait.PollUntilContextTimeout(ctx, 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		hpa, err := f.GetHPA(ctx, hpaName, namespace)
 		if err != nil {
-			return false, nil
+			return false, nil //nolint:nilerr
 		}
 
 		if hpa.Status.CurrentReplicas > 0 {
@@ -698,8 +697,8 @@ func (f *Framework) EnsureHPAReplicasInRange(ctx context.Context, hpaName, names
 		}
 
 		current := hpa.Status.CurrentReplicas
-		if current < min || current > max {
-			return fmt.Errorf("HPA %s replicas %d out of range [%d, %d]", hpaName, current, min, max)
+		if current < minReplicas || current > maxReplicas {
+			return fmt.Errorf("HPA %s replicas %d out of range [%d, %d]", hpaName, current, minReplicas, maxReplicas)
 		}
 
 		time.Sleep(10 * time.Second)
@@ -757,7 +756,7 @@ func RenderHPATemplate(cfg HPATemplateConfig) (string, error) {
 
 // RenderTemplate renders a Go template file from testdata/ with the given data.
 func RenderTemplate(templateFile string, data interface{}) (string, error) {
-	_, filename, _, _ := runtime.Caller(0)
+	_, filename, _, _ := runtime.Caller(0) //nolint:dogsled
 	root := filepath.Join(filepath.Dir(filename), "..", "..")
 	path := filepath.Join(root, "testdata", templateFile)
 

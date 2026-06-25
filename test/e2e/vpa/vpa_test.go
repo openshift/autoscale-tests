@@ -14,6 +14,19 @@ import (
 var f *framework.Framework
 var operatorInstalledByTest bool
 
+const (
+	cpu100m          = "100m"
+	cpu200m          = "200m"
+	cpu500m          = "500m"
+	cpu1000m         = "1000m"
+	mem100Mi         = "100Mi"
+	mem200Mi         = "200Mi"
+	mem1000Mi        = "1000Mi"
+	containerSidecar = "sidecar"
+	labelKeyApp      = "app"
+	keyCPUResource   = "cpu"
+)
+
 var _ = BeforeSuite(func() {
 	var err error
 
@@ -190,7 +203,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			Expect(len(recs)).To(BeNumerically(">=", 1))
 			GinkgoWriter.Printf("[Test] Recommendation: %+v\n", recs[0])
 
-			Expect(recs[0].Target).To(HaveKey("cpu"), "Recommendation should include CPU target")
+			Expect(recs[0].Target).To(HaveKey(keyCPUResource), "Recommendation should include CPU target")
 		})
 
 		It("should respect minAllowed in recommendation", func() {
@@ -241,7 +254,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 				Namespace:        testNamespace,
 				TargetDeployment: deploymentName,
 				UpdateMode:       framework.VPAUpdateModeOff,
-				MinAllowed:       map[string]string{"cpu": "500m"},
+				MinAllowed:       map[string]string{keyCPUResource: cpu500m},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() {
@@ -261,8 +274,8 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(recs)).To(BeNumerically(">=", 1))
 
-			targetCPU := resource.MustParse(recs[0].Target["cpu"])
-			minCPU := resource.MustParse("500m")
+			targetCPU := resource.MustParse(recs[0].Target[keyCPUResource])
+			minCPU := resource.MustParse(cpu500m)
 
 			GinkgoWriter.Printf("[Test] Target CPU: %s, minAllowed: 500m\n", targetCPU.String())
 			Expect(targetCPU.Cmp(minCPU)).To(BeNumerically(">=", 0),
@@ -317,7 +330,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 				Namespace:        testNamespace,
 				TargetDeployment: deploymentName,
 				UpdateMode:       framework.VPAUpdateModeOff,
-				MaxAllowed:       map[string]string{"cpu": "200m"},
+				MaxAllowed:       map[string]string{keyCPUResource: cpu200m},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() {
@@ -337,8 +350,8 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(recs)).To(BeNumerically(">=", 1))
 
-			targetCPU := resource.MustParse(recs[0].Target["cpu"])
-			maxCPU := resource.MustParse("200m")
+			targetCPU := resource.MustParse(recs[0].Target[keyCPUResource])
+			maxCPU := resource.MustParse(cpu200m)
 
 			GinkgoWriter.Printf("[Test] Target CPU: %s, maxAllowed: 200m\n", targetCPU.String())
 			Expect(targetCPU.Cmp(maxCPU)).To(BeNumerically("<=", 0),
@@ -371,12 +384,12 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			By("Creating deployment with two containers")
 
 			cfg := framework.DefaultDeploymentConfig(deploymentName, testNamespace)
-			cfg.CPURequest = "100m"
+			cfg.CPURequest = cpu100m
 			cfg.MemoryRequest = "64Mi"
-			cfg.CPULimit = "500m"
+			cfg.CPULimit = cpu500m
 			cfg.MemoryLimit = "256Mi"
 			cfg.ExtraContainers = []framework.ContainerConfig{{
-				Name:          "sidecar",
+				Name:          containerSidecar,
 				Image:         "registry.k8s.io/pause:3.9",
 				CPURequest:    "50m",
 				MemoryRequest: "32Mi",
@@ -403,7 +416,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 				UpdateMode:       framework.VPAUpdateModeOff,
 				ContainerPolicies: []framework.VPAContainerPolicy{
 					{ContainerName: "test-container", Mode: "Auto"},
-					{ContainerName: "sidecar", Mode: "Off"},
+					{ContainerName: containerSidecar, Mode: "Off"},
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -432,7 +445,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 					hasMain = true
 				}
 
-				if rec.ContainerName == "sidecar" {
+				if rec.ContainerName == containerSidecar {
 					hasSidecar = true
 				}
 			}
@@ -480,9 +493,9 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 
 			cfg := framework.DefaultDeploymentConfig(deploymentName, testNamespace)
 			cfg.Replicas = 0
-			cfg.CPURequest = "100m"
-			cfg.MemoryRequest = "100Mi"
-			cfg.CPULimit = "500m"
+			cfg.CPURequest = cpu100m
+			cfg.MemoryRequest = mem100Mi
+			cfg.CPULimit = cpu500m
 			cfg.MemoryLimit = "500Mi"
 			_, err = f.CreateDeployment(f.Ctx, cfg)
 			Expect(err).NotTo(HaveOccurred())
@@ -525,7 +538,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 
 			By("Checking pod requests were mutated by VPA admission")
 
-			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{"app": deploymentName})
+			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{labelKeyApp: deploymentName})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(pods.Items)).To(BeNumerically(">=", 1))
 
@@ -538,7 +551,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			GinkgoWriter.Printf("[Test] Pod requests: CPU=%s, Mem=%s\n", cpuReq.String(), memReq.String())
 
 			expectedCPU := resource.MustParse("250m")
-			expectedMem := resource.MustParse("200Mi")
+			expectedMem := resource.MustParse(mem200Mi)
 
 			Expect(cpuReq.Cmp(expectedCPU)).To(Equal(0),
 				"CPU request should match VPA recommendation (250m), got %s", cpuReq.String())
@@ -569,10 +582,10 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 
 			cfg := framework.DefaultDeploymentConfig(deploymentName, testNamespace)
 			cfg.Replicas = 0
-			cfg.CPURequest = "100m"
-			cfg.MemoryRequest = "100Mi"
-			cfg.CPULimit = "200m"
-			cfg.MemoryLimit = "200Mi"
+			cfg.CPURequest = cpu100m
+			cfg.MemoryRequest = mem100Mi
+			cfg.CPULimit = cpu200m
+			cfg.MemoryLimit = mem200Mi
 			_, err = f.CreateDeployment(f.Ctx, cfg)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeleteDeployment(f.Ctx, deploymentName, testNamespace) })
@@ -605,7 +618,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			err = f.WaitForDeploymentReady(f.Ctx, deploymentName, testNamespace, 2*time.Minute)
 			Expect(err).NotTo(HaveOccurred())
 
-			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{"app": deploymentName})
+			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{labelKeyApp: deploymentName})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(pods.Items)).To(BeNumerically(">=", 1))
 
@@ -656,10 +669,10 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 
 			cfg := framework.DefaultDeploymentConfig(deploymentName, testNamespace)
 			cfg.Replicas = 0
-			cfg.CPURequest = "100m"
-			cfg.MemoryRequest = "100Mi"
-			cfg.CPULimit = "1000m"
-			cfg.MemoryLimit = "1000Mi"
+			cfg.CPURequest = cpu100m
+			cfg.MemoryRequest = mem100Mi
+			cfg.CPULimit = cpu1000m
+			cfg.MemoryLimit = mem1000Mi
 			_, err = f.CreateDeployment(f.Ctx, cfg)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeleteDeployment(f.Ctx, deploymentName, testNamespace) })
@@ -671,7 +684,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 				Namespace:        testNamespace,
 				TargetDeployment: deploymentName,
 				UpdateMode:       framework.VPAUpdateModeAuto,
-				MaxAllowed:       map[string]string{"cpu": "200m", "memory": "200Mi"},
+				MaxAllowed:       map[string]string{keyCPUResource: cpu200m, "memory": mem200Mi},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeleteVPA(f.Ctx, vpaName, testNamespace) })
@@ -693,7 +706,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			err = f.WaitForDeploymentReady(f.Ctx, deploymentName, testNamespace, 2*time.Minute)
 			Expect(err).NotTo(HaveOccurred())
 
-			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{"app": deploymentName})
+			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{labelKeyApp: deploymentName})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(pods.Items)).To(BeNumerically(">=", 1))
 
@@ -702,8 +715,8 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			memReq := container.Resources.Requests[corev1.ResourceMemory]
 			GinkgoWriter.Printf("[Test] Pod requests: CPU=%s, Mem=%s\n", cpuReq.String(), memReq.String())
 
-			maxCPU := resource.MustParse("200m")
-			maxMem := resource.MustParse("200Mi")
+			maxCPU := resource.MustParse(cpu200m)
+			maxMem := resource.MustParse(mem200Mi)
 
 			Expect(cpuReq.Cmp(maxCPU)).To(BeNumerically("<=", 0),
 				"CPU request should be capped to maxAllowed (200m)")
@@ -733,10 +746,10 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 
 			cfg := framework.DefaultDeploymentConfig(deploymentName, testNamespace)
 			cfg.Replicas = 0
-			cfg.CPURequest = "100m"
-			cfg.MemoryRequest = "100Mi"
-			cfg.CPULimit = "1000m"
-			cfg.MemoryLimit = "1000Mi"
+			cfg.CPURequest = cpu100m
+			cfg.MemoryRequest = mem100Mi
+			cfg.CPULimit = cpu1000m
+			cfg.MemoryLimit = mem1000Mi
 			_, err = f.CreateDeployment(f.Ctx, cfg)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeleteDeployment(f.Ctx, deploymentName, testNamespace) })
@@ -748,7 +761,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 				Namespace:        testNamespace,
 				TargetDeployment: deploymentName,
 				UpdateMode:       framework.VPAUpdateModeAuto,
-				MinAllowed:       map[string]string{"cpu": "300m", "memory": "300Mi"},
+				MinAllowed:       map[string]string{keyCPUResource: "300m", "memory": "300Mi"},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeleteVPA(f.Ctx, vpaName, testNamespace) })
@@ -776,7 +789,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			err = f.WaitForDeploymentReady(f.Ctx, deploymentName, testNamespace, 2*time.Minute)
 			Expect(err).NotTo(HaveOccurred())
 
-			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{"app": deploymentName})
+			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{labelKeyApp: deploymentName})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(pods.Items)).To(BeNumerically(">=", 1))
 
@@ -821,10 +834,10 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 
 			cfg := framework.DefaultDeploymentConfig(deploymentName, testNamespace)
 			cfg.Replicas = 1
-			cfg.CPURequest = "100m"
-			cfg.MemoryRequest = "100Mi"
-			cfg.CPULimit = "200m"
-			cfg.MemoryLimit = "200Mi"
+			cfg.CPURequest = cpu100m
+			cfg.MemoryRequest = mem100Mi
+			cfg.CPULimit = cpu200m
+			cfg.MemoryLimit = mem200Mi
 			_, err = f.CreateDeployment(f.Ctx, cfg)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = f.DeleteDeployment(f.Ctx, deploymentName, testNamespace) })
@@ -845,7 +858,7 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 
 			By("Verifying pod requests remain unchanged")
 
-			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{"app": deploymentName})
+			pods, err := f.ListPods(f.Ctx, testNamespace, map[string]string{labelKeyApp: deploymentName})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(pods.Items)).To(BeNumerically(">=", 1))
 
@@ -854,8 +867,8 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 			memReq := container.Resources.Requests[corev1.ResourceMemory]
 			GinkgoWriter.Printf("[Test] Pod requests: CPU=%s, Mem=%s\n", cpuReq.String(), memReq.String())
 
-			origCPU := resource.MustParse("100m")
-			origMem := resource.MustParse("100Mi")
+			origCPU := resource.MustParse(cpu100m)
+			origMem := resource.MustParse(mem100Mi)
 
 			Expect(cpuReq.Cmp(origCPU)).To(Equal(0),
 				"CPU request should remain original (100m) when no recommendation")
@@ -902,16 +915,16 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 
 			deploymentName := "vpa-evict-deploy"
 			vpaName := "vpa-evict"
-			labels := map[string]string{"app": deploymentName}
+			labels := map[string]string{labelKeyApp: deploymentName}
 
 			By("Creating deployment with low CPU request (2 replicas for safe eviction)")
 
 			cfg := framework.DefaultDeploymentConfig(deploymentName, testNamespace)
 			cfg.Replicas = 2
-			cfg.CPURequest = "100m"
-			cfg.MemoryRequest = "100Mi"
-			cfg.CPULimit = "1000m"
-			cfg.MemoryLimit = "1000Mi"
+			cfg.CPURequest = cpu100m
+			cfg.MemoryRequest = mem100Mi
+			cfg.CPULimit = cpu1000m
+			cfg.MemoryLimit = mem1000Mi
 			_, err = f.CreateDeployment(f.Ctx, cfg)
 			Expect(err).NotTo(HaveOccurred())
 			err = f.WaitForDeploymentReady(f.Ctx, deploymentName, testNamespace, 2*time.Minute)
@@ -988,7 +1001,3 @@ var _ = Describe("VPA (Vertical Pod Autoscaler)", func() {
 		})
 	})
 })
-
-func isPodRunning(pod *corev1.Pod) bool {
-	return pod.Status.Phase == corev1.PodRunning
-}

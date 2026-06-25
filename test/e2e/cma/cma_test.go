@@ -13,6 +13,17 @@ import (
 var f *framework.Framework
 var operatorInstalledByTest bool
 
+const (
+	scaledObjectTypeCron  = "cron"
+	timezoneUTC           = "Etc/UTC"
+	keyTimezone           = "timezone"
+	keyStart              = "start"
+	keyEnd                = "end"
+	keyDesiredReplicas    = "desiredReplicas"
+	metricTypeUtilization = "Utilization"
+	keyValue              = "value"
+)
+
 var _ = BeforeSuite(func() {
 	var err error
 
@@ -217,12 +228,12 @@ var _ = Describe("Custom Metrics Autoscaler Operator", func() {
 				CooldownPeriod:                int64Ptr(5),
 				ScaleDownStabilizationSeconds: int64Ptr(15),
 				Triggers: []framework.ScaledObjectTrigger{{
-					Type: "cron",
+					Type: scaledObjectTypeCron,
 					Metadata: map[string]string{
-						"timezone":        "Etc/UTC",
-						"start":           fmt.Sprintf("%d * * * *", startMin),
-						"end":             fmt.Sprintf("%d * * * *", endMin),
-						"desiredReplicas": "4",
+						keyTimezone:        timezoneUTC,
+						keyStart:           fmt.Sprintf("%d * * * *", startMin),
+						keyEnd:             fmt.Sprintf("%d * * * *", endMin),
+						keyDesiredReplicas: "4",
 					},
 				}},
 			})
@@ -301,9 +312,9 @@ var _ = Describe("Custom Metrics Autoscaler Operator", func() {
 				CooldownPeriod:                int64Ptr(30),
 				Triggers: []framework.ScaledObjectTrigger{{
 					Type:       "cpu",
-					MetricType: "Utilization",
+					MetricType: metricTypeUtilization,
 					Metadata: map[string]string{
-						"value": "50",
+						keyValue: "50",
 					},
 				}},
 			})
@@ -390,9 +401,9 @@ var _ = Describe("Custom Metrics Autoscaler Operator", func() {
 				CooldownPeriod:                int64Ptr(30),
 				Triggers: []framework.ScaledObjectTrigger{{
 					Type:       "memory",
-					MetricType: "Utilization",
+					MetricType: metricTypeUtilization,
 					Metadata: map[string]string{
-						"value": "50",
+						keyValue: "50",
 					},
 				}},
 			})
@@ -471,12 +482,12 @@ var _ = Describe("Custom Metrics Autoscaler Operator", func() {
 				PollingInterval: int64Ptr(5),
 				CooldownPeriod:  int64Ptr(5),
 				Triggers: []framework.ScaledObjectTrigger{{
-					Type: "cron",
+					Type: scaledObjectTypeCron,
 					Metadata: map[string]string{
-						"timezone":        "Etc/UTC",
-						"start":           "0 0 1 1 *",
-						"end":             "1 0 1 1 *",
-						"desiredReplicas": "3",
+						keyTimezone:        timezoneUTC,
+						keyStart:           "0 0 1 1 *",
+						keyEnd:             "1 0 1 1 *",
+						keyDesiredReplicas: "3",
 					},
 				}},
 			})
@@ -549,12 +560,12 @@ var _ = Describe("Custom Metrics Autoscaler Operator", func() {
 				PollingInterval: int64Ptr(5),
 				CooldownPeriod:  int64Ptr(5),
 				Triggers: []framework.ScaledObjectTrigger{{
-					Type: "cron",
+					Type: scaledObjectTypeCron,
 					Metadata: map[string]string{
-						"timezone":        "Etc/UTC",
-						"start":           fmt.Sprintf("%d * * * *", startMin),
-						"end":             fmt.Sprintf("%d * * * *", endMin),
-						"desiredReplicas": "4",
+						keyTimezone:        timezoneUTC,
+						keyStart:           fmt.Sprintf("%d * * * *", startMin),
+						keyEnd:             fmt.Sprintf("%d * * * *", endMin),
+						keyDesiredReplicas: "4",
 					},
 				}},
 			})
@@ -637,12 +648,12 @@ var _ = Describe("Custom Metrics Autoscaler Operator", func() {
 				DeploymentName: deploymentName,
 				MaxReplicas:    5,
 				Triggers: []framework.ScaledObjectTrigger{{
-					Type: "cron",
+					Type: scaledObjectTypeCron,
 					Metadata: map[string]string{
-						"timezone":        "Etc/UTC",
-						"start":           "0 * * * *",
-						"end":             "1 * * * *",
-						"desiredReplicas": "1",
+						keyTimezone:        timezoneUTC,
+						keyStart:           "0 * * * *",
+						keyEnd:             "1 * * * *",
+						keyDesiredReplicas: "1",
 					},
 				}},
 			})
@@ -661,12 +672,12 @@ var _ = Describe("Custom Metrics Autoscaler Operator", func() {
 				DeploymentName: deploymentName,
 				MaxReplicas:    5,
 				Triggers: []framework.ScaledObjectTrigger{{
-					Type: "cron",
+					Type: scaledObjectTypeCron,
 					Metadata: map[string]string{
-						"timezone":        "Etc/UTC",
-						"start":           "0 * * * *",
-						"end":             "1 * * * *",
-						"desiredReplicas": "1",
+						keyTimezone:        timezoneUTC,
+						keyStart:           "0 * * * *",
+						keyEnd:             "1 * * * *",
+						keyDesiredReplicas: "1",
 					},
 				}},
 			})
@@ -714,9 +725,9 @@ var _ = Describe("Custom Metrics Autoscaler Operator", func() {
 				MaxReplicas:    5,
 				Triggers: []framework.ScaledObjectTrigger{{
 					Type:       "cpu",
-					MetricType: "Utilization",
+					MetricType: metricTypeUtilization,
 					Metadata: map[string]string{
-						"value": "50",
+						keyValue: "50",
 					},
 				}},
 			})

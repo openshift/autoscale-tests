@@ -1,16 +1,13 @@
-GOLANGCI_LINT_VERSION ?= v2.2.1
-GOLANGCI_LINT_BIN ?= $(shell go env GOPATH)/bin/golangci-lint
-
-$(GOLANGCI_LINT_BIN):
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-
-.PHONY: lint
-lint: $(GOLANGCI_LINT_BIN) ## Run golangci-lint on the codebase
-	$(GOLANGCI_LINT_BIN) run --timeout 10m ./...
+PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
+GOLANGCI_LINT = go run ${PROJECT_DIR}/vendor/github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 
 .PHONY: lint-fix
-lint-fix: $(GOLANGCI_LINT_BIN) ## Run golangci-lint with auto-fix
-	$(GOLANGCI_LINT_BIN) run --fix --timeout 10m ./...
+lint-fix: ## Go lint and fix your code
+	( GOLANGCI_LINT_CACHE=$(PROJECT_DIR)/.cache $(GOLANGCI_LINT) run --fix --timeout 10m )
+
+.PHONY: lint
+lint: ## Go lint your code
+	( GOLANGCI_LINT_CACHE=$(PROJECT_DIR)/.cache $(GOLANGCI_LINT) run --timeout 10m )
 
 .PHONY: fmt
 fmt: $(GOLANGCI_LINT_BIN) ## Format code using golangci-lint formatters

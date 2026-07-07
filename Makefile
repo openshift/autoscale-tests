@@ -130,6 +130,12 @@ build-images: build-rpms
 	hack/build-images.sh
 .PHONY: build-images
 
+.PHONY: vendor
+vendor:
+	go mod tidy
+	go mod vendor
+	go mod verify
+
 .PHONY: lint-fix
 lint-fix: ## Go lint and fix your code
 	( GOLANGCI_LINT_CACHE=$(PROJECT_DIR)/.cache $(GOLANGCI_LINT) run --fix --timeout 10m )

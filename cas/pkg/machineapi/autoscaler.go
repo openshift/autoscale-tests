@@ -138,7 +138,7 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 
 		workerNodes, err := framework.GetWorkerNodes(client)
 		Expect(err).NotTo(HaveOccurred(), "Failed to get worker Node objects")
-		Expect(len(workerNodes)).To(BeNumerically(">=", 1), "Expected >= 1 worker node, observed %d", len(workerNodes))
+		Expect(workerNodes).ToNot(BeEmpty(), "Expected >= 1 worker node, observed %d", len(workerNodes))
 
 		memCapacity := workerNodes[0].Status.Allocatable[corev1.ResourceMemory]
 		Expect(memCapacity).ShouldNot(BeNil(), "First worker node does not advertise an allocatable memory capacity")
@@ -1058,7 +1058,7 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
   - .*%s.*
 `, transientMachineSets[0].GetName(), transientMachineSets[1].GetName())
 			priorityConfigMap := corev1resourcebuilder.ConfigMap().WithName("cluster-autoscaler-priority-expander").WithNamespace(framework.MachineAPINamespace).WithData(map[string]string{"priorities": priorities}).Build()
-			Eventually(client.Create(ctx, priorityConfigMap)).Should(Succeed(), "Failed to create ConfigMap with priorities %s", priorities)
+			Eventually(client.Create).WithArguments(ctx, priorityConfigMap).Should(Succeed(), "Failed to create ConfigMap with priorities %s", priorities)
 			cleanupObjects[priorityConfigMap.GetName()] = priorityConfigMap
 
 			jobReplicas := int32(4)

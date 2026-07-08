@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega" //nolint:staticcheck
 
 	configv1 "github.com/openshift/api/config/v1"
 	machinev1 "github.com/openshift/api/machine/v1beta1"
@@ -569,7 +569,7 @@ func WaitForMachineSet(ctx context.Context, c runtimeclient.Client, name string)
 			}
 		}
 
-		Expect(len(failed)).To(Equal(0), "zero machines should be in a Failed phase")
+		Expect(failed).To(BeEmpty(), "zero machines should be in a Failed phase")
 
 		running := FilterRunningMachines(machines)
 

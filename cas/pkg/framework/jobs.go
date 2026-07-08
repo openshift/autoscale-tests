@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega" //nolint:staticcheck
 	machinev1 "github.com/openshift/api/machine/v1beta1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -144,7 +144,7 @@ func WaitForWorkloadOverMachineSets(ctx context.Context, c runtimeclient.Client,
 			klog.Infof("MachineSet %q, Machines and Nodes: %s", machineSet.Name, getMachinesAndNodesAsString(machines))
 		}
 
-		var runningPods int32 = 0
+		var runningPods int32
 
 		for _, pod := range podList.Items {
 			// make sure expected number of pods are running

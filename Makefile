@@ -12,6 +12,11 @@ lint: $(GOLANGCI_LINT_BIN) ## Run golangci-lint on the codebase
 lint-fix: $(GOLANGCI_LINT_BIN) ## Run golangci-lint with auto-fix
 	$(GOLANGCI_LINT_BIN) run --fix --timeout 10m ./...
 
+.PHONY: cas-lint
+cas-lint: ## Run golangci-lint on the /cas directory
+	make -C cas lint
+.PHONY: cas-lint
+
 .PHONY: fmt
 fmt: $(GOLANGCI_LINT_BIN) ## Format code using golangci-lint formatters
 	$(GOLANGCI_LINT_BIN) fmt ./...
@@ -53,6 +58,10 @@ test-e2e-hpa: ## Run HPA E2E tests
 .PHONY: test-e2e-cas
 test-e2e-cas: ## Run Cluster Autoscaler E2E tests
 	make -C cas test-e2e
+
+.PHONY: test-e2e-cas-periodic
+test-e2e-cas-periodic: ## Run Cluster Autoscaler E2E Periodic tests
+	make -C cas test-e2e-periodic
 
 .PHONY: test-e2e-cro
 test-e2e-cro: ## Run CRO E2E tests

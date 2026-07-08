@@ -6,8 +6,8 @@ import (
 
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck
+	. "github.com/onsi/gomega"    //nolint:staticcheck
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -729,7 +729,7 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 
 				for _, n := range nodes {
 					for k := range n.Status.Capacity {
-						resources[k] += 1
+						resources[k]++
 					}
 				}
 

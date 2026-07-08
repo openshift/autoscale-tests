@@ -96,7 +96,9 @@ func (oc *CLI) outputs(ctx context.Context, stdOutBuff, stdErrBuff *bytes.Buffer
 }
 
 func (oc *CLI) start(ctx context.Context, stdOutBuff, stdErrBuff *bytes.Buffer) (*exec.Cmd, error) {
-	oc.finalArgs = append(oc.globalArgs, oc.commandArgs...)
+	oc.finalArgs = append([]string(nil), oc.globalArgs...)
+	oc.finalArgs = append(oc.finalArgs, oc.commandArgs...)
+
 	if oc.verbose {
 		klog.Infof("DEBUG: oc %s\n", oc.printCmd())
 	}

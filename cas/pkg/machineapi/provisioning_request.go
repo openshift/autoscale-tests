@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2" 
-	. "github.com/onsi/gomega"    
+	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck
+	. "github.com/onsi/gomega"    //nolint:staticcheck
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -303,7 +303,7 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 		It("create a ProvisioningRequest successfully", func() {
 			prName := fmt.Sprintf("e2e-provreq-create-%d", time.Now().UnixNano())
 
-			podTemplate := newTestPodTemplate(prName+"-pod-template", framework.MachineAPINamespace)
+			podTemplate := newTestPodTemplate(prName + "-pod-template")
 			Expect(client.Create(ctx, podTemplate)).To(Succeed())
 			defer func() {
 				_ = client.Delete(ctx, podTemplate)
@@ -328,7 +328,7 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 		It("get a ProvisioningRequest after creation", func() {
 			prName := fmt.Sprintf("e2e-provreq-get-%d", time.Now().UnixNano())
 
-			podTemplate := newTestPodTemplate(prName+"-pod-template", framework.MachineAPINamespace)
+			podTemplate := newTestPodTemplate(prName + "-pod-template")
 			Expect(client.Create(ctx, podTemplate)).To(Succeed())
 			defer func() {
 				_ = client.Delete(ctx, podTemplate)
@@ -371,7 +371,7 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 			var podTemplates []*corev1.PodTemplate
 			for i := range prNames {
 				prNames[i] = fmt.Sprintf("e2e-provreq-list-%d-%d", i, time.Now().UnixNano())
-				pt := newTestPodTemplate(prNames[i]+"-pod-template", framework.MachineAPINamespace)
+				pt := newTestPodTemplate(prNames[i] + "-pod-template")
 				Expect(client.Create(ctx, pt)).To(Succeed())
 				podTemplates = append(podTemplates, pt)
 
@@ -420,7 +420,7 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 		It("delete a ProvisioningRequest", func() {
 			prName := fmt.Sprintf("e2e-provreq-del-%d", time.Now().UnixNano())
 
-			podTemplate := newTestPodTemplate(prName+"-pod-template", framework.MachineAPINamespace)
+			podTemplate := newTestPodTemplate(prName + "-pod-template")
 			Expect(client.Create(ctx, podTemplate)).To(Succeed())
 			defer func() {
 				_ = client.Delete(ctx, podTemplate)
@@ -521,7 +521,7 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 		It("set status conditions on a check-capacity ProvisioningRequest", func() {
 			prName := fmt.Sprintf("e2e-provreq-status-%d", time.Now().UnixNano())
 
-			podTemplate := newTestPodTemplate(prName+"-pod-template", framework.MachineAPINamespace)
+			podTemplate := newTestPodTemplate(prName + "-pod-template")
 			Expect(client.Create(ctx, podTemplate)).To(Succeed())
 			defer func() {
 				_ = client.Delete(ctx, podTemplate)
@@ -582,7 +582,7 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 		It("accept a ProvisioningRequest with atomic-scale-up class", func() {
 			prName := fmt.Sprintf("e2e-provreq-atomic-%d", time.Now().UnixNano())
 
-			podTemplate := newTestPodTemplate(prName+"-pod-template", framework.MachineAPINamespace)
+			podTemplate := newTestPodTemplate(prName + "-pod-template")
 			Expect(client.Create(ctx, podTemplate)).To(Succeed())
 			defer func() {
 				_ = client.Delete(ctx, podTemplate)
@@ -618,11 +618,11 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 	})
 })
 
-func newTestPodTemplate(name, namespace string) *corev1.PodTemplate {
+func newTestPodTemplate(name string) *corev1.PodTemplate {
 	return &corev1.PodTemplate{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: framework.MachineAPINamespace,
 		},
 		Template: corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{

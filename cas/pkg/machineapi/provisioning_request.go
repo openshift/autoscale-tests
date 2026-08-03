@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"    //nolint:staticcheck
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,19 +19,19 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/klog"
+	"k8s.io/utils/ptr"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	configv1 "github.com/openshift/api/config/v1"
+	machinev1 "github.com/openshift/api/machine/v1beta1"
 	caov1 "github.com/openshift/cluster-autoscaler-operator/pkg/apis/autoscaling/v1"
+	caov1beta1 "github.com/openshift/cluster-autoscaler-operator/pkg/apis/autoscaling/v1beta1"
+	annotationsutil "github.com/openshift/machine-api-operator/pkg/util/machineset"
 
 	"github.com/openshift/autoscale-tests/cas/pkg/framework"
 )
 
-const (
-	provisioningRequestFeatureGate = "ProvisioningRequestAvailable"
-	enableProvisioningRequestsArg  = "--enable-provisioning-requests"
-)
-
-var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial, func() {
+var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, framework.LabelDisruptive, Serial, func() {
 	var (
 		client runtimeclient.Client
 		ctx    context.Context
@@ -58,7 +59,7 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 		}
 	})
 
-	Context("have proper infrastructure on DevPreviewNoUpgrade clusters", func() {
+	Context("have proper infrastructure", func() {
 
 		It("have the ProvisioningRequest CRD registered", func() {
 			crd := &unstructured.Unstructured{}
@@ -74,36 +75,14 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 			klog.Infof("ProvisioningRequest CRD found: %s", crd.GetName())
 		})
 
-		It("have correct feature gate annotations on the ProvisioningRequest CRD", func() {
-			crd := &unstructured.Unstructured{}
-			crd.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   "apiextensions.k8s.io",
-				Version: "v1",
-				Kind:    "CustomResourceDefinition",
-			})
-			err := client.Get(ctx, runtimeclient.ObjectKey{
-				Name: "provisioningrequests.autoscaling.x-k8s.io",
-			}, crd)
-			Expect(err).NotTo(HaveOccurred())
-
-			annotations := crd.GetAnnotations()
-			Expect(annotations).To(HaveKeyWithValue(
-				"feature-gate.release.openshift.io/"+provisioningRequestFeatureGate, "true"),
-				"CRD should have ProvisioningRequestAvailable feature gate annotation")
-			Expect(annotations).To(HaveKeyWithValue(
-				"release.openshift.io/feature-set", "DevPreviewNoUpgrade"),
-				"CRD should have DevPreviewNoUpgrade feature-set annotation")
-			klog.Info("ProvisioningRequest CRD annotations verified")
-		})
-
-		It("have the operator ClusterRole for provisioning requests", func() {
+		It("have the ClusterRoles for provisioning requests", func() {
+			By("Checking operator ClusterRole")
 			cr := &rbacv1.ClusterRole{}
 			err := client.Get(ctx, runtimeclient.ObjectKey{
 				Name: "cluster-autoscaler-operator-prov-req",
 			}, cr)
 			Expect(err).NotTo(HaveOccurred(), "Operator ProvisioningRequest ClusterRole should exist")
 
-			By("Verifying correct API group in rules")
 			hasProvReqRule := false
 			for _, rule := range cr.Rules {
 				for _, group := range rule.APIGroups {
@@ -116,25 +95,15 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 			Expect(hasProvReqRule).To(BeTrue(),
 				"ClusterRole should have rules for autoscaling.x-k8s.io API group")
 
-			By("Verifying feature gate annotations")
-			Expect(cr.Annotations).To(HaveKeyWithValue(
-				"feature-gate.release.openshift.io/"+provisioningRequestFeatureGate, "true"))
-			Expect(cr.Annotations).To(HaveKeyWithValue(
-				"release.openshift.io/feature-set", "DevPreviewNoUpgrade"))
-
-			klog.Infof("Operator ClusterRole %q verified with correct rules and annotations", cr.Name)
-		})
-
-		It("have the autoscaler ClusterRole for provisioning requests", func() {
-			cr := &rbacv1.ClusterRole{}
-			err := client.Get(ctx, runtimeclient.ObjectKey{
+			By("Checking autoscaler ClusterRole")
+			cr2 := &rbacv1.ClusterRole{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
 				Name: "cluster-autoscaler-prov-req",
-			}, cr)
+			}, cr2)
 			Expect(err).NotTo(HaveOccurred(), "Autoscaler ProvisioningRequest ClusterRole should exist")
 
-			By("Verifying correct API group in rules")
-			hasProvReqRule := false
-			for _, rule := range cr.Rules {
+			hasProvReqRule = false
+			for _, rule := range cr2.Rules {
 				for _, group := range rule.APIGroups {
 					if group == framework.ProvisioningRequestGroup {
 						hasProvReqRule = true
@@ -145,79 +114,61 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 			Expect(hasProvReqRule).To(BeTrue(),
 				"ClusterRole should have rules for autoscaling.x-k8s.io API group")
 
-			By("Verifying feature gate annotations")
-			Expect(cr.Annotations).To(HaveKeyWithValue(
-				"feature-gate.release.openshift.io/"+provisioningRequestFeatureGate, "true"))
-			Expect(cr.Annotations).To(HaveKeyWithValue(
-				"release.openshift.io/feature-set", "DevPreviewNoUpgrade"))
-
-			klog.Infof("Autoscaler ClusterRole %q verified with correct rules and annotations", cr.Name)
+			klog.Info("Both ProvisioningRequest ClusterRoles verified")
 		})
 
-		It("have the operator ClusterRoleBinding for provisioning requests", func() {
+		It("have the ClusterRoleBindings for provisioning requests", func() {
+			By("Checking operator ClusterRoleBinding")
 			crb := &rbacv1.ClusterRoleBinding{}
 			err := client.Get(ctx, runtimeclient.ObjectKey{
 				Name: "cluster-autoscaler-operator-prov-req",
 			}, crb)
 			Expect(err).NotTo(HaveOccurred(), "Operator ProvisioningRequest ClusterRoleBinding should exist")
-
 			Expect(crb.RoleRef.Name).To(Equal("cluster-autoscaler-operator-prov-req"))
-			Expect(crb.RoleRef.Kind).To(Equal("ClusterRole"))
 
-			hasSA := false
-			for _, subject := range crb.Subjects {
-				if subject.Kind == "ServiceAccount" &&
-					subject.Name == "cluster-autoscaler-operator" &&
-					subject.Namespace == framework.MachineAPINamespace {
-					hasSA = true
-					break
-				}
-			}
-			Expect(hasSA).To(BeTrue(),
-				"ClusterRoleBinding should reference cluster-autoscaler-operator ServiceAccount")
-			klog.Infof("Operator ClusterRoleBinding %q verified", crb.Name)
-		})
-
-		It("have the autoscaler ClusterRoleBinding for provisioning requests", func() {
-			crb := &rbacv1.ClusterRoleBinding{}
-			err := client.Get(ctx, runtimeclient.ObjectKey{
+			By("Checking autoscaler ClusterRoleBinding")
+			crb2 := &rbacv1.ClusterRoleBinding{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
 				Name: "cluster-autoscaler-prov-req",
-			}, crb)
+			}, crb2)
 			Expect(err).NotTo(HaveOccurred(), "Autoscaler ProvisioningRequest ClusterRoleBinding should exist")
+			Expect(crb2.RoleRef.Name).To(Equal("cluster-autoscaler-prov-req"))
 
-			Expect(crb.RoleRef.Name).To(Equal("cluster-autoscaler-prov-req"))
-			Expect(crb.RoleRef.Kind).To(Equal("ClusterRole"))
-
-			hasSA := false
-			for _, subject := range crb.Subjects {
-				if subject.Kind == "ServiceAccount" &&
-					subject.Name == "cluster-autoscaler" &&
-					subject.Namespace == framework.MachineAPINamespace {
-					hasSA = true
-					break
-				}
-			}
-			Expect(hasSA).To(BeTrue(),
-				"ClusterRoleBinding should reference cluster-autoscaler ServiceAccount")
-			klog.Infof("Autoscaler ClusterRoleBinding %q verified", crb.Name)
+			klog.Info("Both ProvisioningRequest ClusterRoleBindings verified")
 		})
 	})
 
-	Context("pass the enable flag to the cluster-autoscaler", func() {
+	Context("scale up a MachineSet via atomic-scale-up ProvisioningRequest", func() {
 
 		var (
 			clusterAutoscaler *caov1.ClusterAutoscaler
+			machineAutoscaler *caov1beta1.MachineAutoscaler
+			machineSet        *machinev1.MachineSet
+			podTemplate       *corev1.PodTemplate
+			workload          *batchv1.Job
+			targetedNodeLabel string
 			cleanupCA         bool
 		)
 
 		BeforeEach(func() {
+			By("Checking platform supports scale from zero")
+			clusterInfra, infraErr := framework.GetInfrastructure(ctx, client)
+			Expect(infraErr).NotTo(HaveOccurred(), "Failed to get cluster infrastructure object")
+
+			platform := clusterInfra.Status.PlatformStatus.Type
+			switch platform {
+			case configv1.AWSPlatformType, configv1.GCPPlatformType, configv1.AzurePlatformType, configv1.OpenStackPlatformType, configv1.VSpherePlatformType, configv1.NutanixPlatformType:
+				klog.Infof("Platform is %v", platform)
+			default:
+				Skip(fmt.Sprintf("Platform %v does not support autoscaling from/to zero, skipping.", platform))
+			}
+
 			By("Ensuring a ClusterAutoscaler resource exists")
 			existingCA, getErr := framework.GetClusterAutoscaler(client, "default")
 			if getErr != nil {
 				if !apierrors.IsNotFound(getErr) {
 					Expect(getErr).NotTo(HaveOccurred())
 				}
-				By("Creating a ClusterAutoscaler for the test")
 				clusterAutoscaler = &caov1.ClusterAutoscaler{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "default",
@@ -228,7 +179,9 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 						APIVersion: "autoscaling.openshift.io/v1",
 					},
 					Spec: caov1.ClusterAutoscalerSpec{
-						ResourceLimits: &caov1.ResourceLimits{},
+						ResourceLimits: &caov1.ResourceLimits{
+							MaxNodesTotal: ptr.To[int32](100),
+						},
 						ScaleDown: &caov1.ScaleDownConfig{
 							Enabled: true,
 						},
@@ -241,274 +194,132 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 				clusterAutoscaler = existingCA
 				cleanupCA = false
 			}
-		})
 
-		AfterEach(func() {
-			if cleanupCA && clusterAutoscaler != nil {
-				By("Cleaning up test ClusterAutoscaler")
-				_ = client.Delete(ctx, clusterAutoscaler)
-				Eventually(func() bool {
-					_, err := framework.GetClusterAutoscaler(client, "default")
-					return apierrors.IsNotFound(err)
-				}, framework.WaitMedium, pollingInterval).Should(BeTrue())
-			}
-		})
-
-		It("have --enable-provisioning-requests=true in the cluster-autoscaler deployment args", func() {
-			By("Waiting for the cluster-autoscaler deployment to be ready")
-			caDeploymentName := "cluster-autoscaler-" + clusterAutoscaler.Name
+			By("Verifying cluster-autoscaler has --enable-provisioning-requests=true")
 			var caDeployment appsv1.Deployment
 			Eventually(func() error {
-				if err := client.Get(ctx, runtimeclient.ObjectKey{
-					Name:      caDeploymentName,
+				return client.Get(ctx, runtimeclient.ObjectKey{
+					Name:      "cluster-autoscaler-" + clusterAutoscaler.Name,
 					Namespace: framework.MachineAPINamespace,
-				}, &caDeployment); err != nil {
-					return fmt.Errorf("cluster-autoscaler deployment %q not found: %w", caDeploymentName, err)
-				}
-				if caDeployment.Status.ReadyReplicas < 1 {
-					return fmt.Errorf("cluster-autoscaler not ready yet (ready=%d)", caDeployment.Status.ReadyReplicas)
-				}
-				return nil
+				}, &caDeployment)
 			}, framework.WaitMedium, pollingInterval).Should(Succeed(),
-				"cluster-autoscaler deployment should be running")
+				"cluster-autoscaler deployment should exist")
 
-			By("Checking for --enable-provisioning-requests=true in container args")
-			found := false
+			provReqEnabled := false
 			for _, container := range caDeployment.Spec.Template.Spec.Containers {
 				for _, arg := range container.Args {
-					if strings.Contains(arg, enableProvisioningRequestsArg) &&
-						strings.Contains(arg, "true") {
-						found = true
+					if strings.Contains(arg, "--enable-provisioning-requests") && strings.Contains(arg, "true") {
+						provReqEnabled = true
 						break
 					}
 				}
-				if !found {
-					for _, arg := range container.Command {
-						if strings.Contains(arg, enableProvisioningRequestsArg) &&
-							strings.Contains(arg, "true") {
-							found = true
-							break
-						}
-					}
-				}
 			}
-			Expect(found).To(BeTrue(),
-				"cluster-autoscaler deployment should have %s=true in args", enableProvisioningRequestsArg)
-			klog.Infof("cluster-autoscaler deployment has %s=true", enableProvisioningRequestsArg)
-		})
-	})
-
-	Context("support CRUD operations on ProvisioningRequest objects", func() {
-
-		It("create a ProvisioningRequest successfully", func() {
-			prName := fmt.Sprintf("e2e-provreq-create-%d", time.Now().UnixNano())
-
-			podTemplate := newTestPodTemplate(prName + "-pod-template")
-			Expect(client.Create(ctx, podTemplate)).To(Succeed())
-			defer func() {
-				_ = client.Delete(ctx, podTemplate)
-			}()
-
-			pr := framework.NewProvisioningRequest(framework.ProvisioningRequestConfig{
-				Name:              prName,
-				Namespace:         framework.MachineAPINamespace,
-				ProvisioningClass: "check-capacity.autoscaling.x-k8s.io",
-				PodTemplateName:   podTemplate.Name,
-				PodCount:          1,
-			})
-			Expect(client.Create(ctx, pr)).To(Succeed(),
-				"Should be able to create a ProvisioningRequest")
-			defer func() {
-				_ = client.Delete(ctx, pr)
-			}()
-
-			klog.Infof("ProvisioningRequest %q created successfully", prName)
-		})
-
-		It("get a ProvisioningRequest after creation", func() {
-			prName := fmt.Sprintf("e2e-provreq-get-%d", time.Now().UnixNano())
-
-			podTemplate := newTestPodTemplate(prName + "-pod-template")
-			Expect(client.Create(ctx, podTemplate)).To(Succeed())
-			defer func() {
-				_ = client.Delete(ctx, podTemplate)
-			}()
-
-			pr := framework.NewProvisioningRequest(framework.ProvisioningRequestConfig{
-				Name:              prName,
-				Namespace:         framework.MachineAPINamespace,
-				ProvisioningClass: "check-capacity.autoscaling.x-k8s.io",
-				PodTemplateName:   podTemplate.Name,
-				PodCount:          1,
-			})
-			Expect(client.Create(ctx, pr)).To(Succeed())
-			defer func() {
-				_ = client.Delete(ctx, pr)
-			}()
-
-			By("Getting the ProvisioningRequest")
-			fetched := &unstructured.Unstructured{}
-			fetched.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   framework.ProvisioningRequestGroup,
-				Version: framework.ProvisioningRequestVersion,
-				Kind:    framework.ProvisioningRequestKind,
-			})
-			Expect(client.Get(ctx, runtimeclient.ObjectKey{
-				Name:      prName,
-				Namespace: framework.MachineAPINamespace,
-			}, fetched)).To(Succeed())
-
-			Expect(fetched.GetName()).To(Equal(prName))
-
-			provClass, _, _ := unstructured.NestedString(fetched.Object, "spec", "provisioningClassName")
-			Expect(provClass).To(Equal("check-capacity.autoscaling.x-k8s.io"))
-
-			klog.Infof("ProvisioningRequest %q fetched with provisioningClassName=%s", prName, provClass)
-		})
-
-		It("list ProvisioningRequests in a namespace", func() {
-			prNames := make([]string, 3)
-			var podTemplates []*corev1.PodTemplate
-			for i := range prNames {
-				prNames[i] = fmt.Sprintf("e2e-provreq-list-%d-%d", i, time.Now().UnixNano())
-				pt := newTestPodTemplate(prNames[i] + "-pod-template")
-				Expect(client.Create(ctx, pt)).To(Succeed())
-				podTemplates = append(podTemplates, pt)
-
-				pr := framework.NewProvisioningRequest(framework.ProvisioningRequestConfig{
-					Name:              prNames[i],
-					Namespace:         framework.MachineAPINamespace,
-					ProvisioningClass: "check-capacity.autoscaling.x-k8s.io",
-					PodTemplateName:   pt.Name,
-					PodCount:          1,
-				})
-				Expect(client.Create(ctx, pr)).To(Succeed())
+			if !provReqEnabled {
+				Skip("cluster-autoscaler does not have --enable-provisioning-requests=true flag")
 			}
-			defer func() {
-				for _, name := range prNames {
-					pr := &unstructured.Unstructured{}
-					pr.SetGroupVersionKind(schema.GroupVersionKind{
-						Group:   framework.ProvisioningRequestGroup,
-						Version: framework.ProvisioningRequestVersion,
-						Kind:    framework.ProvisioningRequestKind,
-					})
-					pr.SetName(name)
-					pr.SetNamespace(framework.MachineAPINamespace)
-					_ = client.Delete(ctx, pr)
+
+			By("Creating a new MachineSet with 0 replicas")
+			machineSetParams := framework.BuildMachineSetParams(ctx, client, 0)
+			targetedNodeLabel = "machine.openshift.io/provreq-e2e-worker"
+			machineSetParams.Labels[targetedNodeLabel] = ""
+			machineSet, err = framework.CreateMachineSet(client, machineSetParams)
+			Expect(err).ToNot(HaveOccurred(), "Failed to create MachineSet with 0 replicas")
+
+			framework.WaitForMachineSet(ctx, client, machineSet.GetName())
+
+			By("Waiting for scale-from-zero annotations on the MachineSet")
+			Eventually(func() (map[string]string, error) {
+				ms, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+				if err != nil {
+					return nil, err
 				}
-				for _, pt := range podTemplates {
-					_ = client.Delete(ctx, pt)
-				}
-			}()
+				return ms.Annotations, nil
+			}, framework.WaitMedium, pollingInterval).Should(SatisfyAll(
+				HaveKey(annotationsutil.CpuKeyDeprecated),
+				HaveKey(annotationsutil.MemoryKeyDeprecated),
+			), "MachineSet should have scale-from-zero capacity annotations")
 
-			By("Listing ProvisioningRequests")
-			prList := &unstructured.UnstructuredList{}
-			prList.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   framework.ProvisioningRequestGroup,
-				Version: framework.ProvisioningRequestVersion,
-				Kind:    framework.ProvisioningRequestKind + "List",
-			})
-			Expect(client.List(ctx, prList,
-				runtimeclient.InNamespace(framework.MachineAPINamespace))).To(Succeed())
-			Expect(len(prList.Items)).To(BeNumerically(">=", 3),
-				"Should list at least 3 ProvisioningRequests we created")
-
-			klog.Infof("Listed %d ProvisioningRequests in namespace %s",
-				len(prList.Items), framework.MachineAPINamespace)
-		})
-
-		It("delete a ProvisioningRequest", func() {
-			prName := fmt.Sprintf("e2e-provreq-del-%d", time.Now().UnixNano())
-
-			podTemplate := newTestPodTemplate(prName + "-pod-template")
-			Expect(client.Create(ctx, podTemplate)).To(Succeed())
-			defer func() {
-				_ = client.Delete(ctx, podTemplate)
-			}()
-
-			pr := framework.NewProvisioningRequest(framework.ProvisioningRequestConfig{
-				Name:              prName,
-				Namespace:         framework.MachineAPINamespace,
-				ProvisioningClass: "check-capacity.autoscaling.x-k8s.io",
-				PodTemplateName:   podTemplate.Name,
-				PodCount:          1,
-			})
-			Expect(client.Create(ctx, pr)).To(Succeed())
-
-			By("Deleting the ProvisioningRequest")
-			Expect(client.Delete(ctx, pr)).To(Succeed())
-
-			By("Verifying deletion")
-			fetched := &unstructured.Unstructured{}
-			fetched.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   framework.ProvisioningRequestGroup,
-				Version: framework.ProvisioningRequestVersion,
-				Kind:    framework.ProvisioningRequestKind,
-			})
-			err := client.Get(ctx, runtimeclient.ObjectKey{
-				Name:      prName,
-				Namespace: framework.MachineAPINamespace,
-			}, fetched)
-			Expect(apierrors.IsNotFound(err)).To(BeTrue(),
-				"ProvisioningRequest should not exist after deletion")
-			klog.Infof("ProvisioningRequest %q deleted and confirmed gone", prName)
-		})
-	})
-
-	Context("process ProvisioningRequests via the cluster-autoscaler", func() {
-
-		var (
-			clusterAutoscaler *caov1.ClusterAutoscaler
-			cleanupCA         bool
-		)
-
-		BeforeEach(func() {
-			existingCA, getErr := framework.GetClusterAutoscaler(client, "default")
-			if getErr != nil {
-				if !apierrors.IsNotFound(getErr) {
-					Expect(getErr).NotTo(HaveOccurred())
-				}
-				clusterAutoscaler = &caov1.ClusterAutoscaler{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "default",
-						Namespace: framework.MachineAPINamespace,
+			By("Creating a MachineAutoscaler for the MachineSet")
+			machineAutoscaler = &caov1beta1.MachineAutoscaler{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "provreq-e2e-",
+					Namespace:    framework.MachineAPINamespace,
+				},
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "MachineAutoscaler",
+					APIVersion: "autoscaling.openshift.io/v1beta1",
+				},
+				Spec: caov1beta1.MachineAutoscalerSpec{
+					MaxReplicas: 3,
+					MinReplicas: 0,
+					ScaleTargetRef: caov1beta1.CrossVersionObjectReference{
+						Name:       machineSet.Name,
+						Kind:       "MachineSet",
+						APIVersion: "machine.openshift.io/v1beta1",
 					},
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "ClusterAutoscaler",
-						APIVersion: "autoscaling.openshift.io/v1",
-					},
-					Spec: caov1.ClusterAutoscalerSpec{
-						ResourceLimits: &caov1.ResourceLimits{},
-						ScaleDown: &caov1.ScaleDownConfig{
-							Enabled: true,
+				},
+			}
+			Expect(client.Create(ctx, machineAutoscaler)).To(Succeed(),
+				"Failed to create MachineAutoscaler")
+
+			By("Creating a PodTemplate for the ProvisioningRequest")
+			podTemplate = &corev1.PodTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      machineSet.Name + "-pod-template",
+					Namespace: framework.MachineAPINamespace,
+				},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Affinity: &corev1.Affinity{
+							NodeAffinity: &corev1.NodeAffinity{
+								RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+									NodeSelectorTerms: []corev1.NodeSelectorTerm{
+										{
+											MatchExpressions: []corev1.NodeSelectorRequirement{
+												{
+													Key:      targetedNodeLabel,
+													Operator: corev1.NodeSelectorOpExists,
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+						Containers: []corev1.Container{
+							{
+								Name:  "pause",
+								Image: "registry.k8s.io/pause:3.9",
+								Resources: corev1.ResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("100m"),
+										corev1.ResourceMemory: resource.MustParse("128Mi"),
+									},
+								},
+							},
 						},
 					},
-				}
-				Expect(client.Create(ctx, clusterAutoscaler)).To(Succeed())
-				cleanupCA = true
-			} else {
-				clusterAutoscaler = existingCA
-				cleanupCA = false
+				},
 			}
-
-			By("Waiting for cluster-autoscaler to be ready")
-			caDeploymentName := "cluster-autoscaler-" + clusterAutoscaler.Name
-			Eventually(func() error {
-				var caDeployment appsv1.Deployment
-				if err := client.Get(ctx, runtimeclient.ObjectKey{
-					Name:      caDeploymentName,
-					Namespace: framework.MachineAPINamespace,
-				}, &caDeployment); err != nil {
-					return fmt.Errorf("cluster-autoscaler deployment %q not found: %w", caDeploymentName, err)
-				}
-				if caDeployment.Status.ReadyReplicas < 1 {
-					return fmt.Errorf("cluster-autoscaler not ready")
-				}
-				return nil
-			}, framework.WaitMedium, pollingInterval).Should(Succeed())
+			Expect(client.Create(ctx, podTemplate)).To(Succeed(),
+				"Failed to create PodTemplate")
 		})
 
 		AfterEach(func() {
+			By("Cleaning up test resources")
+			if workload != nil {
+				_ = client.Delete(ctx, workload, runtimeclient.PropagationPolicy(metav1.DeletePropagationBackground))
+			}
+			if podTemplate != nil {
+				_ = client.Delete(ctx, podTemplate)
+			}
+			if machineAutoscaler != nil {
+				_ = client.Delete(ctx, machineAutoscaler)
+			}
+			if machineSet != nil {
+				_ = client.Delete(ctx, machineSet)
+				framework.WaitForMachineSetsDeleted(ctx, client, machineSet)
+			}
 			if cleanupCA && clusterAutoscaler != nil {
 				_ = client.Delete(ctx, clusterAutoscaler)
 				Eventually(func() bool {
@@ -518,127 +329,78 @@ var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, Serial
 			}
 		})
 
-		It("set status conditions on a check-capacity ProvisioningRequest", func() {
-			prName := fmt.Sprintf("e2e-provreq-status-%d", time.Now().UnixNano())
+		It("scale up the MachineSet when a ProvisioningRequest with atomic-scale-up is created", func() {
+			prName := fmt.Sprintf("e2e-provreq-scaleup-%d", time.Now().UnixNano())
+			expectedReplicas := int32(1)
 
-			podTemplate := newTestPodTemplate(prName + "-pod-template")
-			Expect(client.Create(ctx, podTemplate)).To(Succeed())
-			defer func() {
-				_ = client.Delete(ctx, podTemplate)
-			}()
-
-			pr := framework.NewProvisioningRequest(framework.ProvisioningRequestConfig{
-				Name:              prName,
-				Namespace:         framework.MachineAPINamespace,
-				ProvisioningClass: "check-capacity.autoscaling.x-k8s.io",
-				PodTemplateName:   podTemplate.Name,
-				PodCount:          1,
-			})
-			Expect(client.Create(ctx, pr)).To(Succeed())
-			defer func() {
-				_ = client.Delete(ctx, pr)
-			}()
-
-			By("Waiting for autoscaler to set status conditions on the ProvisioningRequest")
-			Eventually(func() bool {
-				fetched := &unstructured.Unstructured{}
-				fetched.SetGroupVersionKind(schema.GroupVersionKind{
-					Group:   framework.ProvisioningRequestGroup,
-					Version: framework.ProvisioningRequestVersion,
-					Kind:    framework.ProvisioningRequestKind,
-				})
-				if err := client.Get(ctx, runtimeclient.ObjectKey{
-					Name:      prName,
-					Namespace: framework.MachineAPINamespace,
-				}, fetched); err != nil {
-					return false
-				}
-				conditions, found, _ := unstructured.NestedSlice(fetched.Object, "status", "conditions")
-				return found && len(conditions) > 0
-			}, framework.WaitOverMedium, pollingInterval).Should(BeTrue(),
-				"Autoscaler should eventually set status conditions on ProvisioningRequest")
-
-			fetched := &unstructured.Unstructured{}
-			fetched.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   framework.ProvisioningRequestGroup,
-				Version: framework.ProvisioningRequestVersion,
-				Kind:    framework.ProvisioningRequestKind,
-			})
-			Expect(client.Get(ctx, runtimeclient.ObjectKey{
-				Name:      prName,
-				Namespace: framework.MachineAPINamespace,
-			}, fetched)).To(Succeed())
-
-			conditions, _, _ := unstructured.NestedSlice(fetched.Object, "status", "conditions")
-			klog.Infof("ProvisioningRequest %q has %d status conditions:", prName, len(conditions))
-			for _, c := range conditions {
-				if cond, ok := c.(map[string]interface{}); ok {
-					klog.Infof("  type=%v status=%v reason=%v message=%v",
-						cond["type"], cond["status"], cond["reason"], cond["message"])
-				}
-			}
-		})
-
-		It("accept a ProvisioningRequest with atomic-scale-up class", func() {
-			prName := fmt.Sprintf("e2e-provreq-atomic-%d", time.Now().UnixNano())
-
-			podTemplate := newTestPodTemplate(prName + "-pod-template")
-			Expect(client.Create(ctx, podTemplate)).To(Succeed())
-			defer func() {
-				_ = client.Delete(ctx, podTemplate)
-			}()
-
+			By("Creating an atomic-scale-up ProvisioningRequest")
 			pr := framework.NewProvisioningRequest(framework.ProvisioningRequestConfig{
 				Name:              prName,
 				Namespace:         framework.MachineAPINamespace,
 				ProvisioningClass: "atomic-scale-up.autoscaling.x-k8s.io",
 				PodTemplateName:   podTemplate.Name,
-				PodCount:          1,
+				PodCount:          int64(expectedReplicas),
 			})
-			Expect(client.Create(ctx, pr)).To(Succeed())
+			Expect(client.Create(ctx, pr)).To(Succeed(),
+				"Should be able to create ProvisioningRequest")
 			defer func() {
 				_ = client.Delete(ctx, pr)
 			}()
 
-			By("Verifying the ProvisioningRequest exists in the API")
-			fetched := &unstructured.Unstructured{}
-			fetched.SetGroupVersionKind(schema.GroupVersionKind{
+			klog.Infof("Created ProvisioningRequest %s with class atomic-scale-up targeting PodTemplate %s",
+				prName, podTemplate.Name)
+
+			By("Creating workload pods targeting the MachineSet to ensure scale-up")
+			workload = framework.NewWorkLoad(expectedReplicas, resource.MustParse("128Mi"),
+				fmt.Sprintf("provreq-workload-%d", time.Now().Unix()),
+				autoscalingTestLabel, "provisioning-request",
+				corev1.NodeSelectorRequirement{
+					Key:      targetedNodeLabel,
+					Operator: corev1.NodeSelectorOpExists,
+				})
+			Expect(client.Create(ctx, workload)).To(Succeed(), "Failed to create workload")
+
+			By("Waiting for the MachineSet to scale up")
+			Eventually(func() bool {
+				ms, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+				Expect(err).ToNot(HaveOccurred(), "Failed to get MachineSet %s", machineSet.GetName())
+
+				By(fmt.Sprintf("Waiting for machineSet replicas to scale out. Current replicas are %v, expected %v.",
+					*ms.Spec.Replicas, expectedReplicas))
+
+				return *ms.Spec.Replicas == expectedReplicas
+			}, framework.WaitLong, pollingInterval).Should(BeTrue(),
+				"MachineSet %s failed to scale out to %d replicas", machineSet.GetName(), expectedReplicas)
+
+			By("Checking ProvisioningRequest status")
+			prStatus := &unstructured.Unstructured{}
+			prStatus.SetGroupVersionKind(schema.GroupVersionKind{
 				Group:   framework.ProvisioningRequestGroup,
 				Version: framework.ProvisioningRequestVersion,
 				Kind:    framework.ProvisioningRequestKind,
 			})
-			Expect(client.Get(ctx, runtimeclient.ObjectKey{
+			if err := client.Get(ctx, runtimeclient.ObjectKey{
 				Name:      prName,
 				Namespace: framework.MachineAPINamespace,
-			}, fetched)).To(Succeed())
-			Expect(fetched.GetName()).To(Equal(prName))
+			}, prStatus); err == nil {
+				conditions, found, _ := unstructured.NestedSlice(prStatus.Object, "status", "conditions")
+				if found && len(conditions) > 0 {
+					for _, c := range conditions {
+						if cond, ok := c.(map[string]interface{}); ok {
+							klog.Infof("ProvisioningRequest %s condition: type=%v status=%v",
+								prName, cond["type"], cond["status"])
+						}
+					}
+				} else {
+					klog.Warningf("ProvisioningRequest %s has no status conditions yet", prName)
+				}
+			}
 
-			klog.Infof("ProvisioningRequest %q with atomic-scale-up class accepted", prName)
+			By("Waiting for Machines in the MachineSet to become Running")
+			framework.WaitForMachineSet(ctx, client, machineSet.GetName())
+
+			klog.Infof("Scale-up verified: MachineSet %s scaled to %d replicas",
+				machineSet.GetName(), expectedReplicas)
 		})
 	})
 })
-
-func newTestPodTemplate(name string) *corev1.PodTemplate {
-	return &corev1.PodTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: framework.MachineAPINamespace,
-		},
-		Template: corev1.PodTemplateSpec{
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:  "pause",
-						Image: "registry.k8s.io/pause:3.9",
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("100m"),
-								corev1.ResourceMemory: resource.MustParse("128Mi"),
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-}

@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck
 	. "github.com/onsi/gomega"    //nolint:staticcheck
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -584,6 +585,56 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 				}, framework.WaitMedium, pollingInterval).Should(BeTrue(), "Node %s has a deletion taint and it should not", machine.Status.NodeRef.Name)
 			}
 		})
+
+		// Machines required for test: 0
+		// Reason: This test verifies that when EnforceNodeGroupMinSize is disabled,
+		// the ClusterAutoscaler does NOT scale up a MachineSet from 0 unless there is workload demand.
+		It("should not enforce minimum size", func() {
+			// Only run in platforms which support autoscaling from/to zero.
+			clusterInfra, err := framework.GetInfrastructure(ctx, client)
+			Expect(err).NotTo(HaveOccurred(), "Failed to get cluster infrastructure object")
+
+			platform := clusterInfra.Status.PlatformStatus.Type
+			switch platform {
+			case configv1.AWSPlatformType, configv1.GCPPlatformType, configv1.AzurePlatformType, configv1.OpenStackPlatformType, configv1.VSpherePlatformType, configv1.NutanixPlatformType:
+				klog.Infof("Platform is %v", platform)
+			default:
+				Skip(fmt.Sprintf("Platform %v does not support autoscaling from/to zero, skipping.", platform))
+			}
+
+			minReplicas := int32(1)
+			maxReplicas := int32(3)
+
+			By("Creating MachineSet with 0 replicas")
+
+			targetedNodeLabel := fmt.Sprintf("%v-no-enforce-min-size", autoscalerWorkerNodeRoleLabel)
+			machineSetParams := framework.BuildMachineSetParams(ctx, client, 0)
+			machineSetParams.Labels[targetedNodeLabel] = ""
+			machineSet, err := framework.CreateMachineSet(client, machineSetParams)
+			Expect(err).ToNot(HaveOccurred(), "Failed to create MachineSet with 0 replicas")
+
+			cleanupObjects[machineSet.GetName()] = machineSet
+
+			By("Waiting for the MachineSet to be created")
+			framework.WaitForMachineSet(ctx, client, machineSet.GetName())
+
+			By(fmt.Sprintf("Creating a MachineAutoscaler backed by MachineSet %s - min: %d, max: %d",
+				machineSet.GetName(), minReplicas, maxReplicas))
+			asr := machineAutoscalerResource(machineSet, minReplicas, maxReplicas)
+			Expect(client.Create(ctx, asr)).Should(Succeed(), "Failed to create MachineAutoscaler")
+			cleanupObjects[asr.GetName()] = asr
+
+			By("Verifying ClusterAutoscaler does NOT scale up without workload demand")
+			Consistently(func() (int32, error) {
+				current, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+				if err != nil {
+					return -1, err
+				}
+
+				return *current.Spec.Replicas, nil
+			}, framework.WaitShort, pollingInterval).Should(BeEquivalentTo(int32(0)),
+				"ClusterAutoscaler should not enforce min size when disabled - MachineSet should stay at 0")
+		})
 	})
 
 	Context("use a ClusterAutoscaler that has balance similar nodes enabled and 100 maximum total nodes", func() {
@@ -1094,6 +1145,312 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 
 			By(fmt.Sprintf("Waiting for %d workload pods to be running", jobReplicas))
 			framework.WaitForWorkloadOverMachineSets(ctx, client, []*machinev1.MachineSet{transientMachineSets[0], transientMachineSets[1]}, jobReplicas, workload.GetName())
+		})
+	})
+
+	Context("use a ClusterAutoscaler with NewPodScaleUpDelay option", framework.LabelPeriodic, func() {
+		var (
+			clusterAutoscaler *caov1.ClusterAutoscaler
+			delay             time.Duration
+		)
+
+		BeforeEach(func() {
+			gatherer, err = framework.NewGatherer()
+			Expect(err).ToNot(HaveOccurred(), "Failed to create gatherer")
+
+			By("Creating ClusterAutoscaler")
+
+			scaleUpDelay := "5m"
+
+			delay, err = time.ParseDuration(scaleUpDelay)
+
+			Expect(err).ToNot(HaveOccurred(), "invalid NewPodScaleUpDelay")
+
+			clusterAutoscaler = clusterAutoscalerResource(100)
+			clusterAutoscaler.Spec.ScaleUp = &caov1.ScaleUpConfig{
+				NewPodScaleUpDelay: &scaleUpDelay,
+			}
+			Expect(client.Create(ctx, clusterAutoscaler)).Should(Succeed(), "Failed to create ClusterAutoscaler")
+			cleanupObjects[clusterAutoscaler.GetName()] = clusterAutoscaler
+		})
+
+		AfterEach(func() {
+			specReport := CurrentSpecReport()
+			if specReport.Failed() {
+				Expect(gatherer.WithSpecReport(specReport).GatherAll()).To(Succeed(), "Failed to gather spec report")
+			}
+
+			// explicitly delete the ClusterAutoscaler
+			// this is needed due to the autoscaler tests requiring singleton
+			// deployments of the ClusterAutoscaler.
+			By("Waiting for ClusterAutoscaler to delete.")
+
+			caName := clusterAutoscaler.GetName()
+			Expect(deleteObject(caName, cleanupObjects[caName])).Should(Succeed(), "Failed to delete ClusterAutoscaler")
+			delete(cleanupObjects, caName)
+			Eventually(func() (bool, error) {
+				_, err := framework.GetClusterAutoscaler(client, caName)
+				if apierrors.IsNotFound(err) {
+					return true, nil
+				}
+				// Return the error so that failures print additional errors
+				return false, err
+			}, framework.WaitMedium, pollingInterval).Should(BeTrue(), "Failed to cleanup Cluster Autoscaler before timeout")
+		})
+
+		It("should not schedule pods on nodes", func() {
+			minReplica := 1
+
+			By(fmt.Sprintf("Creating a new MachineSet with %d replica", minReplica))
+
+			machineSetParams := framework.BuildMachineSetParams(ctx, client, minReplica)
+			targetedNodeLabel := fmt.Sprintf("%v-pod-scale-up-delay", autoscalerWorkerNodeRoleLabel)
+			machineSetParams.Labels[targetedNodeLabel] = ""
+
+			machineSet, err := framework.CreateMachineSet(client, machineSetParams)
+			Expect(err).ToNot(HaveOccurred(), "Failed to create MachineSet with %d replicas", minReplica)
+
+			cleanupObjects[machineSet.GetName()] = machineSet
+
+			framework.WaitForMachineSet(ctx, client, machineSet.GetName())
+
+			Eventually(func() (int, error) {
+				machines, err := framework.GetMachinesFromMachineSet(ctx, client, machineSet)
+				if err != nil {
+					return 0, err
+				}
+
+				return len(machines), nil
+			}, framework.WaitMedium, pollingInterval).Should(BeNumerically("==", minReplica), "Expected %d machine replica to be up", minReplica)
+
+			maxReplicas := 3
+
+			By(fmt.Sprintf("Creating a MachineAutoscaler backed by MachineSet %s/%s - min:%v, max:%v",
+				machineSet.GetNamespace(), machineSet.GetName(), minReplica, maxReplicas))
+
+			asr := machineAutoscalerResource(machineSet, int32(minReplica), int32(maxReplicas))
+			Expect(client.Create(ctx, asr)).Should(Succeed(), "Failed to create MachineAutoscaler with min %d/max %d replicas", minReplica, maxReplicas)
+			cleanupObjects[asr.GetName()] = asr
+
+			uniqueJobName := fmt.Sprintf("%s-pod-scale-up-delay", workloadJobName)
+
+			By(fmt.Sprintf("Creating scale-out workload %s: jobs: %v, memory: %s", uniqueJobName, maxReplicas, workloadMemRequest.String()))
+			workload := framework.NewWorkLoad(int32(maxReplicas), workloadMemRequest, uniqueJobName, autoscalingTestLabel, "", corev1.NodeSelectorRequirement{
+				Key:      targetedNodeLabel,
+				Operator: corev1.NodeSelectorOpExists,
+			})
+			cleanupObjects[workload.GetName()] = workload
+
+			Expect(client.Create(ctx, workload)).Should(Succeed(), "Failed to create scale-out workload %s", workloadJobName)
+
+			job := &batchv1.Job{}
+			key := runtimeclient.ObjectKey{Namespace: framework.MachineAPINamespace, Name: workload.GetName()}
+			err = client.Get(ctx, key, job)
+			Expect(err).ToNot(HaveOccurred(), "getting workload job should not error")
+
+			decreasedDelay := delay - 30*time.Second
+
+			By("Ensuring the correct number of job pods")
+			Eventually(func() (int, error) {
+				podList := &corev1.PodList{}
+				listOpts := []runtimeclient.ListOption{
+					runtimeclient.InNamespace(job.Namespace),
+					runtimeclient.MatchingLabels(job.Spec.Template.ObjectMeta.Labels),
+				}
+
+				if err := client.List(ctx, podList, listOpts...); err != nil {
+					return 0, err
+				}
+
+				return len(podList.Items), nil
+			}, framework.WaitShort, pollingInterval).Should(BeEquivalentTo(int(*job.Spec.Completions)), "workload job did not reach %d pods", *job.Spec.Completions)
+
+			By("Only one pod and machine should be up, respecting NewPodScaleUpDelay field")
+			Consistently(func() error {
+				if err := client.Get(ctx, key, job); err != nil {
+					return err
+				}
+
+				podList := &corev1.PodList{}
+				listOpts := []runtimeclient.ListOption{
+					runtimeclient.InNamespace(job.Namespace),
+					runtimeclient.MatchingLabels(job.Spec.Template.ObjectMeta.Labels),
+				}
+
+				if err := client.List(ctx, podList, listOpts...); err != nil {
+					return err
+				}
+
+				// there's a chance that some job pods may have completed, but realistically this should not happen
+				// if so, just fail the test
+				if job.Status.Succeeded > 0 || job.Status.Failed > 0 {
+					return StopTrying(fmt.Sprintf("job %q with %d succeeded and %d failed pods", workload.GetName(), job.Status.Succeeded, job.Status.Failed))
+				}
+
+				machines, err := framework.GetMachinesFromMachineSet(ctx, client, machineSet)
+				if err != nil {
+					return err
+				}
+
+				if len(machines) != minReplica {
+					return fmt.Errorf("expected %d machine, got %d", minReplica, len(machines))
+				}
+
+				var pendingPods int32
+
+				for _, pod := range podList.Items {
+					if pod.Status.Phase == corev1.PodPending {
+						pendingPods++
+					}
+				}
+
+				// Initially all 3 pods are pending, then one runs. pendingPods < 2 means autoscaler ignored NewPodScaleUpDelay.
+				if pendingPods < int32(maxReplicas-1) {
+					return fmt.Errorf("expected %d pending pods, got %d", maxReplicas-1, pendingPods)
+				}
+
+				return nil
+			}, decreasedDelay, framework.RetryShort).Should(Succeed())
+
+			By("After the scaleUpDelay, machineset should be scaled up")
+
+			Eventually(func() bool {
+				ms, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+				Expect(err).ToNot(HaveOccurred(), "Failed to get MachineSet %s", machineSet.GetName())
+
+				By(fmt.Sprintf("Waiting for machineSet replicas to scale out. Current replicas are %v, expected %v.",
+					*ms.Spec.Replicas, maxReplicas))
+
+				return *ms.Spec.Replicas == int32(maxReplicas)
+			}, framework.WaitMedium, pollingInterval).Should(BeTrue(), "MachineSet %s failed to scale out to %d replicas", machineSet.GetName(), maxReplicas)
+
+			By(fmt.Sprintf("Waiting for %d workload pods to be running", maxReplicas))
+			framework.WaitForWorkload(ctx, client, machineSet, int32(maxReplicas), workload.GetName())
+
+			By("Deleting the workload")
+			Expect(deleteObject(workload.Name, cleanupObjects[workload.Name])).Should(Succeed(), "Failed to delete scale-out workload %s", workload.Name)
+			delete(cleanupObjects, workload.Name)
+			Eventually(func() bool {
+				ms, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+				Expect(err).ToNot(HaveOccurred(), "Failed to get MachineSet %s", machineSet.GetName())
+
+				By(fmt.Sprintf("Waiting for machineSet replicas to scale in. Current replicas are %v, expected %v.",
+					*ms.Spec.Replicas, minReplica))
+
+				return *ms.Spec.Replicas == int32(minReplica)
+			}, framework.WaitLong, pollingInterval).Should(BeTrue(), "MachineSet %s failed to scale in to %d replicas", machineSet.GetName(), minReplica)
+		})
+	})
+
+	Context("use a ClusterAutoscaler with EnforceNodeGroupMinSize", framework.LabelAutoscaler, framework.LabelPeriodic, func() {
+		var (
+			clusterAutoscaler *caov1.ClusterAutoscaler
+		)
+
+		BeforeEach(func() {
+			gatherer, err = framework.NewGatherer()
+			Expect(err).ToNot(HaveOccurred(), "Failed to create gatherer")
+
+			By("Creating ClusterAutoscaler with EnforceNodeGroupMinSize enabled")
+
+			clusterAutoscaler = clusterAutoscalerResource(100)
+			enforceMode := caov1.EnforceNodeGroupMinSizeModeEnabled
+			clusterAutoscaler.Spec.EnforceNodeGroupMinSize = &enforceMode
+			Expect(client.Create(ctx, clusterAutoscaler)).Should(Succeed(), "Failed to create ClusterAutoscaler")
+			cleanupObjects[clusterAutoscaler.GetName()] = clusterAutoscaler
+		})
+
+		AfterEach(func() {
+			specReport := CurrentSpecReport()
+			if specReport.Failed() {
+				Expect(gatherer.WithSpecReport(specReport).GatherAll()).To(Succeed(), "Failed to gather spec report")
+			}
+
+			if clusterAutoscaler == nil {
+				return
+			}
+
+			By("Waiting for ClusterAutoscaler to delete.")
+
+			caName := clusterAutoscaler.GetName()
+			Expect(deleteObject(caName, cleanupObjects[caName])).Should(Succeed(), "Failed to delete ClusterAutoscaler")
+			delete(cleanupObjects, caName)
+			Eventually(func() (bool, error) {
+				_, err := framework.GetClusterAutoscaler(client, caName)
+				if apierrors.IsNotFound(err) {
+					return true, nil
+				}
+
+				return false, err
+			}, framework.WaitMedium, pollingInterval).Should(BeTrue(), "Failed to cleanup Cluster Autoscaler before timeout")
+		})
+
+		// Machines required for test: 1
+		// Reason: This test verifies that when a MachineSet starts at 0 replicas and a MachineAutoscaler
+		// is created with minReplicas=1, the ClusterAutoscaler with EnforceNodeGroupMinSize enabled
+		// will automatically enforce the minimum and scale up to 1.
+		It("should enforce minimum size and scale up from 0 to 1 replica when enabled", func() {
+			// Only run in platforms which support autoscaling from/to zero.
+			clusterInfra, err := framework.GetInfrastructure(ctx, client)
+			Expect(err).NotTo(HaveOccurred(), "Failed to get cluster infrastructure object")
+
+			platform := clusterInfra.Status.PlatformStatus.Type
+			switch platform {
+			case configv1.AWSPlatformType, configv1.GCPPlatformType, configv1.AzurePlatformType, configv1.OpenStackPlatformType, configv1.VSpherePlatformType, configv1.NutanixPlatformType:
+				klog.Infof("Platform is %v", platform)
+			default:
+				Skip(fmt.Sprintf("Platform %v does not support autoscaling from/to zero, skipping.", platform))
+			}
+
+			minReplicas := int32(1)
+			maxReplicas := int32(3)
+
+			// 1. START WITH MACHINESET AT 0 REPLICAS
+			By("Creating MachineSet with 0 replicas")
+
+			targetedNodeLabel := fmt.Sprintf("%v-enforce-min-size", autoscalerWorkerNodeRoleLabel)
+			machineSetParams := framework.BuildMachineSetParams(ctx, client, 0)
+			machineSetParams.Labels[targetedNodeLabel] = ""
+			machineSet, err := framework.CreateMachineSet(client, machineSetParams)
+			Expect(err).ToNot(HaveOccurred(), "Failed to create MachineSet with 0 replicas")
+
+			cleanupObjects[machineSet.GetName()] = machineSet
+
+			By("Waiting for the MachineSet to be created")
+			framework.WaitForMachineSet(ctx, client, machineSet.GetName())
+
+			// Verify it's actually at 0
+			Eventually(func() (int32, error) {
+				ms, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+				if err != nil {
+					return -1, err
+				}
+
+				return *ms.Spec.Replicas, nil
+			}, framework.WaitShort, pollingInterval).Should(BeEquivalentTo(int32(0)),
+				"MachineSet should start at 0 replicas")
+
+			// 2. CREATE MACHINEAUTOSCALER WITH MIN=1
+			By(fmt.Sprintf("Creating a MachineAutoscaler backed by MachineSet %s - min: %d, max: %d",
+				machineSet.GetName(), minReplicas, maxReplicas))
+			asr := machineAutoscalerResource(machineSet, minReplicas, maxReplicas)
+			Expect(client.Create(ctx, asr)).Should(Succeed(), "Failed to create MachineAutoscaler")
+			cleanupObjects[asr.GetName()] = asr
+
+			// 3. WATCH AUTOSCALER ENFORCE MINIMUM AND SCALE TO 1
+			By(fmt.Sprintf("Verifying ClusterAutoscaler enforces minimum size and scales up to %d", minReplicas))
+			Eventually(func() (int32, error) {
+				current, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+				if err != nil {
+					return 0, err
+				}
+
+				return *current.Spec.Replicas, nil
+			}, framework.WaitLong, pollingInterval).Should(BeEquivalentTo(minReplicas),
+				"ClusterAutoscaler failed to enforce min size and scale up to %d", minReplicas)
+
+			By("Verifying the machine reaches Running phase")
+			framework.WaitForMachineSet(ctx, client, machineSet.GetName())
 		})
 	})
 })

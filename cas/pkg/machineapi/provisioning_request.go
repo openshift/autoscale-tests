@@ -31,7 +31,7 @@ import (
 	"github.com/openshift/autoscale-tests/cas/pkg/framework"
 )
 
-var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, framework.LabelDisruptive, Serial, func() {
+var _ = Describe("ProvisioningRequest should", framework.LabelAutoscaler, framework.LabelDisruptive, framework.LabelPeriodic, Serial, func() {
 	var (
 		client runtimeclient.Client
 		ctx    context.Context

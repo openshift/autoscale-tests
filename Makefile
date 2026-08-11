@@ -63,6 +63,10 @@ test-e2e-cas: ## Run Cluster Autoscaler E2E tests
 test-e2e-cas-periodic: ## Run Cluster Autoscaler E2E Periodic tests
 	make -C cas test-e2e-periodic
 
+.PHONY: test-e2e-cas-techpreview
+test-e2e-cas-techpreview: ## Run Cluster Autoscaler E2E tests requiring TechPreview clusters
+	make -C cas test-e2e-techpreview
+
 .PHONY: test-e2e-cro
 test-e2e-cro: ## Run CRO E2E tests
 	go test -v -timeout 30m ./test/e2e/cro/... -args -ginkgo.v $(GINKGO_FLAGS)

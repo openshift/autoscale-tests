@@ -38,4 +38,7 @@ var (
 
 	// LabelConnectedOnly indicates that the test can run in a connection cluster only.
 	LabelConnectedOnly = ginkgo.Label("connected-only")
+
+	// LabelTechPreview marks tests that require a TechPreviewNoUpgrade or DevPreviewNoUpgrade cluster.
+	LabelTechPreview = ginkgo.Label("tech-preview")
 )

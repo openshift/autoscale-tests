@@ -9,13 +9,13 @@ it. Shows the `autoscale-health` dashboard (`hpa` and `autonode` tabs).
 1. **Prereqs (once):** Docker or Podman + Compose, and
    `gcloud auth application-default login` (the updater needs a credential
    present to read the public bucket).
-2. `tar xzf testgrid-local-20260812.tgz`
-3. `cd` into it, then `docker compose up --build -d`
+2. Clone this repo and `cd testgrid-dashboard`.
+3. `docker compose up --build -d`
 4. Open http://localhost:8081
 
 Stop / clean up: `docker compose down`.
 
-The grid renders immediately from the bundled snapshot; the pipeline refreshes it
+The pipeline populates the grid on its first cycle (~1 min) and then refreshes it
 in place every 60 min. By default the grid shows only failed/flaky tests (uncheck
 the box at the top to see all rows).
 

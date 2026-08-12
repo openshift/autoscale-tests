@@ -1,0 +1,30 @@
+# Builds the TestGrid data pipeline (updater + tabulator + summarizer) into a
+# single image. Run in a loop (see pipeline-loop.sh) to keep the mounted data
+# snapshot current. Only the updater reads the source GCS bucket; tabulator and
+# summarizer work on the local (mounted) data, but sharing one image + one loop
+# guarantees each cycle runs them in order.
+FROM golang:1.25 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/updater ./cmd/updater \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/tabulator ./cmd/tabulator \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/summarizer ./cmd/summarizer
+
+# alpine (not distroless) so the loop script has a shell; static CGO-free
+# binaries run fine on musl. ca-certificates is needed for the updater's HTTPS
+# calls to storage.googleapis.com.
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=build /out/updater /out/tabulator /out/summarizer /usr/local/bin/
+COPY pipeline-loop.sh /usr/local/bin/pipeline-loop.sh
+COPY pipeline-health.sh /usr/local/bin/pipeline-health.sh
+
+# Report unhealthy when the last refresh cycle failed or went stale. The
+# start-period covers the first cycle (updater cold read is ~50s). Interval is
+# generous since cycles are hourly by default.
+HEALTHCHECK --interval=5m --timeout=10s --start-period=3m --retries=3 \
+  CMD ["/usr/local/bin/pipeline-health.sh"]
+
+ENTRYPOINT ["/usr/local/bin/pipeline-loop.sh"]

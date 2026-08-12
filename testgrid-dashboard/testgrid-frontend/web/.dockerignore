@@ -1,0 +1,8 @@
+.git
+node_modules
+dist
+out-tsc
+coverage
+.tmp
+storybook-static
+*.log

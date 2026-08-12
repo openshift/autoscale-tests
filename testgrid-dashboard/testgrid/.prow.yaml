@@ -1,0 +1,14 @@
+presubmits:
+- name: test-testgrid-all
+  decorate: true
+  always_run: true
+  spec:
+    serviceAccountName: presubmits
+    containers:
+    - image: gcr.io/k8s-testgrid/gcloud-bazel:v20220613-v0.6-58-ge5a50c7
+      command:
+      - bazel
+      args:
+      - test
+      - --config=ci
+      - //...

@@ -1,0 +1,12 @@
+allowBuilds:
+  '@vaadin/vaadin-usage-statistics': set this to true or false
+  core-js: set this to true or false
+  core-js-bundle: set this to true or false
+# Approve build scripts for these deps (pnpm 10+ blocks them by default).
+onlyBuiltDependencies:
+  - '@vaadin/vaadin-usage-statistics'
+  - core-js
+  - core-js-bundle
+# Don't re-run the install/ignored-builds check before every `pnpm run` script.
+# pnpm 11 otherwise re-triggers ERR_PNPM_IGNORED_BUILDS on `pnpm run build`.
+verifyDepsBeforeRun: false

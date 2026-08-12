@@ -1,0 +1,117 @@
+import { LitElement, html, css } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
+import { navigateTab } from './utils/navigation.js';
+import { ListDashboardTabsResponse } from './gen/pb/api/v1/data.js';
+import { APIController } from './controllers/api-controller.js';
+import { apiClient } from './APIClient.js';
+import './testgrid-dashboard-summary.js';
+import './testgrid-grid.js';
+
+/**
+ * Class definition for the `testgrid-data-content` element.
+ * Acts as a container for dashboard summary or grid data.
+ */
+@customElement('testgrid-data-content')
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export class TestgridDataContent extends LitElement {
+  static styles = css`
+    :host {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  `;
+
+  @state()
+  tabNames: string[] = [];
+
+  @state()
+  activeIndex = 0;
+
+  @property({ type: Boolean })
+  showTab = false;
+
+  @property({ type: String })
+  dashboardName = '';
+
+  @property({ type: String })
+  tabName?: string;
+
+  private tabsController = new APIController<ListDashboardTabsResponse>(this);
+
+  private handleTabChanged = (evt: Event) => {
+    this.tabName = (<CustomEvent>evt).detail.tabName;
+    this.showTab = !this.showTab;
+    this.highlightIndex(this.tabName);
+    navigateTab(this.dashboardName, this.tabName!);
+  };
+
+  /**
+   * Lit-element lifecycle method.
+   * Invoked when a component is added to the document's DOM.
+   */
+  connectedCallback() {
+    // eslint-disable-next-line wc/guard-super-call
+    super.connectedCallback();
+    this.fetchTabNames();
+    window.addEventListener('tab-changed', this.handleTabChanged);
+  }
+
+  /**
+   * Lit-element lifecycle method.
+   * Invoked when a component is removed from the document's DOM.
+   */
+  disconnectedCallback() {
+    // eslint-disable-next-line wc/guard-super-call
+    super.disconnectedCallback();
+    window.removeEventListener('tab-changed', this.handleTabChanged);
+  }
+
+  /**
+   * Lit-element lifecycle method.
+   * Invoked on each update to perform rendering tasks.
+   */
+  render() {
+    return html`
+      ${!this.showTab
+        ? html`<testgrid-dashboard-summary
+            .dashboardName=${this.dashboardName}
+          ></testgrid-dashboard-summary>`
+        : html`<testgrid-grid
+            .dashboardName=${this.dashboardName}
+            .tabName=${this.tabName}
+          ></testgrid-grid>`}
+    `;
+  }
+
+  // fetch the tab names to populate the tab bar
+  private async fetchTabNames() {
+    try {
+      const data = await this.tabsController.fetch(
+        `dashboard-tabs-${this.dashboardName}`,
+        () => apiClient.getDashboardTabs(this.dashboardName)
+      );
+      const tabNames: string[] = ['Summary'];
+      data.dashboardTabs.forEach(tab => {
+        tabNames.push(tab.name);
+      });
+      this.tabNames = tabNames;
+      this.highlightIndex(this.tabName);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(`Could not get dashboard tabs: ${error}`);
+    }
+  }
+
+  // identify which tab to highlight on the tab bar
+  private highlightIndex(tabName: string | undefined) {
+    if (tabName === undefined) {
+      this.activeIndex = 0;
+      return;
+    }
+    const index = this.tabNames.indexOf(tabName);
+    if (index > -1) {
+      this.activeIndex = index;
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Pipeline-generated data (rewritten every refresh cycle). The compiled
+# local-testgrid/config is kept so the stack boots; grid/tabs/summary are
+# regenerated on the first cycle (~1 min).
+testgrid/local-testgrid/grid/
+testgrid/local-testgrid/tabs/
+testgrid/local-testgrid/summary/
+testgrid/grid/
+testgrid/tabs/
+testgrid/config.pb
+
+# Frontend dependencies and build output
+testgrid-frontend/web/node_modules/
+testgrid-frontend/web/dist/
+testgrid-frontend/web/out-tsc/
+testgrid-frontend/web/custom-elements.json
+
+# Backend scratch
+testgrid/storagels-r
+testgrid/tmp2
+
+# Distribution bundles and logs
+testgrid-local-*.tgz
+*.log

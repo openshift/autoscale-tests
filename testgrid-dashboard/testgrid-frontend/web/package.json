@@ -1,0 +1,111 @@
+{
+  "name": "testgrid-index",
+  "description": "Webcomponent testgrid-index following open-wc recommendations",
+  "license": "Apache-2.0",
+  "author": "testgrid-index",
+  "version": "0.0.0",
+  "scripts": {
+    "lint": "eslint --ext .ts,.html . && prettier \"**/*.ts\" --check",
+    "format": "eslint --ext .ts,.html . --fix && prettier \"**/*.ts\" --write",
+    "test": "tsc && concurrently -k -r -s first \"json-server src/fake-api/data.json --routes src/fake-api/routes.json\" \"wtr --playwright --browsers chromium --coverage\"",
+    "test:watch": "tsc && concurrently -k -r -s first \"tsc --watch --preserveWatchOutput\" \"json-server src/fake-api/data.json --routes src/fake-api/routes.json\" \"wtr --watch\"",
+    "storybook": "tsc && pnpm analyze --exclude dist && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"json-server src/fake-api/data.json --routes src/fake-api/routes.json\" \"wds -c .storybook/server.mjs\"",
+    "storybook:build": "tsc && pnpm analyze --exclude dist && build-storybook",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && rollup -c rollup.config.js && pnpm analyze --exclude dist",
+    "start:build": "web-dev-server --config web-dev-server-k8s.config.mjs --root-dir dist --app-index index.html --open",
+    "analyze": "cem analyze --litelement",
+    "start:local": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"json-server src/fake-api/data.json --routes src/fake-api/routes.json\" \"wds --config web-dev-server-local.config.mjs\"",
+    "start:k8s": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds --config web-dev-server-k8s.config.mjs\"",
+    "start:local-api": "tsc && concurrently -k -r \"tsc --watch --preserveWatchOutput\" \"wds --config web-dev-server-local-api.config.mjs\"",
+    "local-server": "json-server src/fake-api/data.json --routes src/fake-api/routes.json",
+    "reinstall": "npm ci",
+    "preinstall": "npx only-allow pnpm"
+  },
+  "dependencies": {
+    "@lit-labs/router": "^0.1.4",
+    "@lit/context": "^1.1.6",
+    "@material/web": "^2.4.0",
+    "@protobuf-ts/plugin": "^2.11.1",
+    "@protobuf-ts/runtime": "^2.11.1",
+    "@protobuf-ts/runtime-rpc": "^2.11.1",
+    "@vaadin/context-menu": "^24.9.5",
+    "json-server": "^0.17.4",
+    "lit": "^3.3.1",
+    "urlpattern-polyfill": "^10.1.0"
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.28.3",
+    "@custom-elements-manifest/analyzer": "^0.8.4",
+    "@open-wc/building-rollup": "^2.2.3",
+    "@open-wc/eslint-config": "^10.0.0",
+    "@open-wc/testing": "^3.2.2",
+    "@protobuf-ts/plugin": "^2.11.1",
+    "@rollup/plugin-babel": "^6.0.4",
+    "@rollup/plugin-node-resolve": "^15.3.1",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@types/node": "^24.3.0",
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
+    "@web/dev-server": "^0.1.38",
+    "@web/dev-server-storybook": "^0.6.2",
+    "@web/rollup-plugin-html": "^1.11.1",
+    "@web/rollup-plugin-import-meta-assets": "^1.0.8",
+    "@web/test-runner": "^0.15.3",
+    "@web/test-runner-playwright": "^0.9.0",
+    "babel-plugin-template-html-minifier": "^4.1.0",
+    "concurrently": "^9.2.1",
+    "deepmerge": "^4.3.1",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^8.10.2",
+    "husky": "^8.0.3",
+    "json-server": "^0.17.4",
+    "lint-staged": "^13.3.0",
+    "prettier": "^2.8.8",
+    "rimraf": "^6.0.1",
+    "rollup": "^2.79.2",
+    "rollup-plugin-workbox": "^6.2.2",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.2"
+  },
+  "eslintConfig": {
+    "parser": "@typescript-eslint/parser",
+    "extends": [
+      "@open-wc",
+      "prettier"
+    ],
+    "plugins": [
+      "@typescript-eslint"
+    ],
+    "rules": {
+      "no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": "error",
+      "import/no-unresolved": "off",
+      "import/extensions": [
+        "error",
+        "always",
+        {
+          "ignorePackages": true
+        }
+      ]
+    }
+  },
+  "prettier": {
+    "singleQuote": true,
+    "arrowParens": "avoid"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ]
+  },
+  "customElements": "custom-elements.json",
+  "pnpm": {
+    "overrides": {}
+  }
+}

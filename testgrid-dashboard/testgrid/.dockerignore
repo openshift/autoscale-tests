@@ -1,0 +1,11 @@
+.git
+# Generated data is mounted at runtime, not baked into the image.
+local-testgrid
+# Large local scratch files that don't belong in the build context.
+storagels-r
+tmp2
+config.pb
+grid
+tabs
+testgrid-demo
+*.log

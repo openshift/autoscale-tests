@@ -81,6 +81,10 @@ test-e2e: ## Run all non-periodic tests
 test-e2e-periodic: ## Run all periodic tests
 	hack/ci-integration.sh $(GINKGO_FLAGS) --label-filter='periodic' -p
 
+.PHONY: test-e2e-techpreview
+test-e2e-techpreview: ## Run tests that require a TechPreview cluster
+	hack/ci-integration.sh $(GINKGO_FLAGS) --label-filter='tech-preview' -p
+
 .PHONY: help
 help:
 	@grep -E '^[a-zA-Z/0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'

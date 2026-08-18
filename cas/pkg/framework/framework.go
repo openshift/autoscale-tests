@@ -306,6 +306,20 @@ func SkipIfNotTechPreviewNoUpgradeCtx(ctx context.Context, oc *gatherer.CLI, cl 
 	}
 }
 
+// SkipIfNotDevPreviewOrTechPreview skips the test if the cluster FeatureSet is neither
+// DevPreviewNoUpgrade nor TechPreviewNoUpgrade.
+func SkipIfNotDevPreviewOrTechPreview(ctx context.Context, cl runtimeclient.Client) {
+	fg := &configv1.FeatureGate{}
+	err := cl.Get(ctx, runtimeclient.ObjectKey{Name: "cluster"}, fg)
+	Expect(err).NotTo(HaveOccurred(), "Failed to get FeatureGate object")
+
+	featureSet := string(fg.Spec.FeatureSet)
+	if featureSet != string(configv1.DevPreviewNoUpgrade) &&
+		featureSet != string(configv1.TechPreviewNoUpgrade) {
+		Skip(fmt.Sprintf("FeatureSet is %q, requires DevPreviewNoUpgrade or TechPreviewNoUpgrade", featureSet))
+	}
+}
+
 // GetCredentialsFromCluster get credentials from cluster.
 //
 // Deprecated: Use GetCredentialsFromClusterCtx instead.

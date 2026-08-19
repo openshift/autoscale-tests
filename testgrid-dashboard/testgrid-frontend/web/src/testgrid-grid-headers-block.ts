@@ -1,0 +1,113 @@
+import { LitElement, html, css } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
+import { map } from 'lit/directives/map.js';
+import { ListHeadersResponse } from './gen/pb/api/v1/data.js';
+// eslint-disable-next-line import/no-duplicates
+import { CombinedHeader } from './testgrid-grid-header-row.js';
+// eslint-disable-next-line import/no-duplicates
+import './testgrid-grid-header-row.js';
+
+function runLengthEncode(values: string[]): CombinedHeader[] {
+  if (values.length === 0) {
+    return [];
+  }
+
+  const headers: CombinedHeader[] = [];
+  let prev = values[0];
+  let count = 1;
+  for (let i = 1; i < values.length; i += 1) {
+    const curr = values[i];
+    if (prev === curr) {
+      count += 1;
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    // Push the run that just ended (prev/count), not the value that starts the
+    // next run — otherwise every header is shifted by one column, dropping the
+    // first value and duplicating the last, which misaligns the header labels
+    // (build ID, dates) from the result cells below them.
+    headers.push({
+      value: prev,
+      count,
+    });
+    prev = curr;
+    count = 1;
+  }
+  headers.push({
+    value: prev,
+    count,
+  });
+  return headers;
+}
+
+@customElement('testgrid-grid-headers-block')
+export class TestgridGridHeadersBlock extends LitElement {
+  static styles = css`
+    :host {
+      display: block;
+      background: #eee;
+      z-index: 10;
+      width: fit-content;
+      position: sticky;
+      top: 0;
+    }
+  `;
+
+  @property() headers: ListHeadersResponse;
+
+  render() {
+    const builds: string[] = [];
+    const dates: string[] = [];
+    const times: string[] = [];
+    const extras: string[][] = [];
+    for (const header of this.headers?.headers || []) {
+      builds.push(header.build);
+      for (let i = 0; i < header.extra.length; i += 1) {
+        if (i >= extras.length) {
+          extras[i] = [];
+        }
+        extras[i].push(header.extra[i]);
+      }
+      if (header.started === undefined) {
+        // This really shouldn't happen, but set a default value anyway to make that clear.
+        dates.push('-');
+        times.push('-');
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const date = new Date(parseInt(header.started.seconds, 10) * 1000);
+      dates.push(
+        date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      );
+      times.push(
+        date.toLocaleString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: 'numeric',
+        })
+      );
+    }
+    return html`
+      <testgrid-grid-header-row
+        .name="start date"
+        .combinedHeaders="${runLengthEncode(dates)}"
+      ></testgrid-grid-header-row>
+      <testgrid-grid-header-row
+        .name="start time"
+        .combinedHeaders="${runLengthEncode(times)}"
+      ></testgrid-grid-header-row>
+      <testgrid-grid-header-row
+        .name="build ID"
+        .combinedHeaders="${runLengthEncode(builds)}"
+      ></testgrid-grid-header-row>
+      ${map(
+        extras,
+        extra =>
+          html`<testgrid-grid-header-row
+            .name="extra"
+            .combinedHeaders="${runLengthEncode(extra)}"
+          ></testgrid-grid-header-row>`
+      )}
+    `;
+  }
+}

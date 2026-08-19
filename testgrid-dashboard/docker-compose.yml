@@ -1,0 +1,82 @@
+# Local TestGrid stack: data pipeline + Go API server + web frontend.
+#
+# The 'pipeline' service refreshes ./testgrid/local-testgrid on a fixed cycle
+# (default 60 min) by re-running updater -> tabulator -> summarizer against the
+# public CI results bucket, so each machine stays current on its own timer.
+#
+# Prereq (once per machine): authenticate so the updater can read GCS:
+#   gcloud auth application-default login
+# That writes ~/.config/gcloud/application_default_credentials.json, which the
+# pipeline service mounts. The api/frontend need no credentials.
+#
+# Run:  docker compose up --build -d   (podman compose also works)
+# Then open the frontend at http://localhost:8081
+services:
+  pipeline:
+    build:
+      context: ./testgrid
+      dockerfile: Dockerfile.pipeline
+    environment:
+      CONFIG: "file:///data/config"
+      # Seconds between full refresh cycles (60 min).
+      INTERVAL: "3600"
+      # updater/tabulator/summarizer create a Pub/Sub client unconditionally;
+      # a dummy project keeps them happy (idle without --subscribe).
+      GOOGLE_CLOUD_PROJECT: "local-testgrid"
+      # Use the mounted Application Default Credentials to read the source bucket.
+      GOOGLE_APPLICATION_CREDENTIALS: "/gcloud/application_default_credentials.json"
+    volumes:
+      # Read-write: the pipeline writes config/grid/tabs/summary here.
+      - ./testgrid/local-testgrid:/data:z
+      # User ADC, read-only, for the updater's GCS reads. ${HOME} is expanded by
+      # compose. ':z' relabels for SELinux (Fedora); harmless elsewhere.
+      - ${HOME}/.config/gcloud:/gcloud:ro,z
+    restart: unless-stopped
+    # Report unhealthy when the last refresh cycle failed or went stale. Declared
+    # here (not only via the image's HEALTHCHECK) so it's applied consistently
+    # under both Docker and Podman/compose. start_period covers the first cycle
+    # (updater cold read ~50s).
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/pipeline-health.sh"]
+      interval: 5m
+      timeout: 10s
+      start_period: 3m
+      retries: 3
+
+  api:
+    build:
+      context: ./testgrid
+      dockerfile: Dockerfile.api
+    command:
+      - "--scope=file:///data"
+      - "--allowed-origin=*"
+      - "--http-port=8080"
+    environment:
+      # The GCS client eagerly requires credentials at construction, even though
+      # a file:// scope only ever reads the local filesystem. Setting this makes
+      # the client skip credential lookup; the dummy host is never contacted
+      # because local-path dispatch never issues a real GCS request.
+      STORAGE_EMULATOR_HOST: "localhost:9199"
+    volumes:
+      # Data refreshed by the pipeline service, mounted read-only here.
+      # ':z' relabels for SELinux (Fedora).
+      - ./testgrid/local-testgrid:/data:ro,z
+    ports:
+      - "8080:8080"
+    depends_on:
+      - pipeline
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./testgrid-frontend/web
+      dockerfile: Dockerfile
+      args:
+        # Baked into the JS bundle; the browser (on the host) reaches the API
+        # via the published port below.
+        API_URL: http://localhost:8080
+    ports:
+      - "8081:80"
+    depends_on:
+      - api
+    restart: unless-stopped

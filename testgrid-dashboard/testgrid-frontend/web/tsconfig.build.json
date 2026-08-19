@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "//": "Production build: compile app sources only (tests/stories need dev-only test-runner types).",
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,4 @@
+default_test_group:
+  days_of_results: 30
+default_dashboard_tab:
+  description: ""

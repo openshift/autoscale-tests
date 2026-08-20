@@ -1464,7 +1464,7 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 			gatherer, err = framework.NewGatherer()
 			Expect(err).ToNot(HaveOccurred(), "Failed to create gatherer")
 
-			By("Creating ClusterAutoscaler with EnforceNodeGroupMinSize enabled")
+			By("Creating ClusterAutoscaler with startupTaints")
 
 			clusterAutoscaler = clusterAutoscalerResource(100)
 			clusterAutoscaler.Spec.StartupTaints = []string{startupTaintKey}
@@ -1498,12 +1498,13 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 		})
 
 		It("it should not schedule pods on nodes with startup taints", func() {
-			replicas := int32(1)
+			minReplicas := int32(1)
+			maxReplicas := int32(3)
 
 			By("Creating MachineSet with 1 replicas")
 
 			targetedNodeLabel := fmt.Sprintf("%v-startup-taint", autoscalerWorkerNodeRoleLabel)
-			machineSetParams := framework.BuildMachineSetParams(ctx, client, int(replicas))
+			machineSetParams := framework.BuildMachineSetParams(ctx, client, int(minReplicas))
 			machineSetParams.Labels[targetedNodeLabel] = ""
 			machineSetParams.Taints = []corev1.Taint{
 				{
@@ -1521,8 +1522,14 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 
 			uniqueJobName := fmt.Sprintf("%s-startup-taint", workloadJobName)
 
-			By(fmt.Sprintf("Creating startup-taint workload %s: jobs: %v, memory: %s", uniqueJobName, replicas, workloadMemRequest.String()))
-			workload := framework.NewWorkLoad(replicas, workloadMemRequest, uniqueJobName, autoscalingTestLabel, "", corev1.NodeSelectorRequirement{
+			By(fmt.Sprintf("Creating a MachineAutoscaler backed by MachineSet %s - min: %d, max: %d",
+				machineSet.GetName(), minReplicas, maxReplicas))
+			asr := machineAutoscalerResource(machineSet, minReplicas, maxReplicas)
+			Expect(client.Create(ctx, asr)).Should(Succeed(), "Failed to create MachineAutoscaler")
+			cleanupObjects[asr.GetName()] = asr
+
+			By(fmt.Sprintf("Creating startup-taint workload %s: jobs: %v, memory: %s", uniqueJobName, minReplicas, workloadMemRequest.String()))
+			workload := framework.NewWorkLoad(minReplicas, workloadMemRequest, uniqueJobName, autoscalingTestLabel, "", corev1.NodeSelectorRequirement{
 				Key:      targetedNodeLabel,
 				Operator: corev1.NodeSelectorOpExists,
 			})
@@ -1535,6 +1542,8 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 			err = client.Get(ctx, key, job)
 			Expect(err).ToNot(HaveOccurred(), "getting workload job should not error")
 
+			ms, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+			Expect(err).ToNot(HaveOccurred(), "Failed to get MachineSet")
 			By("The pod shouldn't schedule on the node with startup taint")
 			Consistently(func() (int32, error) {
 				if err := client.Get(ctx, key, job); err != nil {
@@ -1565,13 +1574,28 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 					}
 				}
 
+				nodes, err := framework.GetNodes(client, &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      targetedNodeLabel,
+							Operator: metav1.LabelSelectorOpExists,
+						},
+					},
+				})
+
+				if err != nil {
+					return 0, err
+				}
+
+				if len(nodes) > int(minReplicas) {
+					return 0, StopTrying(fmt.Sprintf("nodes from the machineset %s were scaled up. Expected: %d. Got: %d", machineSet.GetName(), int(minReplicas), len(nodes)))
+				}
+
 				return pendingPods, nil
 			}, framework.WaitShort, framework.RetryShort).Should(BeEquivalentTo(int32(1)),
 				"Pod should not schedule on node with startup taint")
 
 			By("Removing the startup taint from the MachineSet")
-			ms, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
-			Expect(err).ToNot(HaveOccurred(), "Failed to get MachineSet")
 			ms.Spec.Template.Spec.Taints = []corev1.Taint{}
 			err = client.Update(ctx, ms)
 			Expect(err).ToNot(HaveOccurred(), "Failed to update MachineSet")
@@ -1596,8 +1620,8 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 			Expect(err).ToNot(HaveOccurred(), "Failed to remove taint from Node")
 
 			By(fmt.Sprintf("Waiting for %d workload pods to be running after untainting",
-				replicas))
-			framework.WaitForWorkload(ctx, client, machineSet, replicas, workload.GetName())
+				minReplicas))
+			framework.WaitForWorkload(ctx, client, machineSet, minReplicas, workload.GetName())
 		})
 	})
 })

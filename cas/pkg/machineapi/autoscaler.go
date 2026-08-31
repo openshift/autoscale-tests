@@ -1453,4 +1453,179 @@ var _ = Describe("Autoscaler should", framework.LabelAutoscaler, framework.Label
 			framework.WaitForMachineSet(ctx, client, machineSet.GetName())
 		})
 	})
+
+	Context("use a ClusterAutoscaler with StartupTaints", framework.LabelAutoscaler, framework.LabelPeriodic, func() {
+		var (
+			clusterAutoscaler *caov1.ClusterAutoscaler
+			startupTaintKey   = "test-e2e-taint"
+		)
+
+		BeforeEach(func() {
+			gatherer, err = framework.NewGatherer()
+			Expect(err).ToNot(HaveOccurred(), "Failed to create gatherer")
+
+			By("Creating ClusterAutoscaler with startupTaints")
+
+			clusterAutoscaler = clusterAutoscalerResource(100)
+			clusterAutoscaler.Spec.StartupTaints = []string{startupTaintKey}
+			Expect(client.Create(ctx, clusterAutoscaler)).Should(Succeed(), "Failed to create ClusterAutoscaler")
+			cleanupObjects[clusterAutoscaler.GetName()] = clusterAutoscaler
+		})
+
+		AfterEach(func() {
+			specReport := CurrentSpecReport()
+			if specReport.Failed() {
+				Expect(gatherer.WithSpecReport(specReport).GatherAll()).To(Succeed(), "Failed to gather spec report")
+			}
+
+			if clusterAutoscaler == nil {
+				return
+			}
+
+			By("Waiting for ClusterAutoscaler to delete.")
+
+			caName := clusterAutoscaler.GetName()
+			Expect(deleteObject(caName, cleanupObjects[caName])).Should(Succeed(), "Failed to delete ClusterAutoscaler")
+			delete(cleanupObjects, caName)
+			Eventually(func() (bool, error) {
+				_, err := framework.GetClusterAutoscaler(client, caName)
+				if apierrors.IsNotFound(err) {
+					return true, nil
+				}
+
+				return false, err
+			}, framework.WaitMedium, pollingInterval).Should(BeTrue(), "Failed to cleanup Cluster Autoscaler before timeout")
+		})
+
+		It("it should not schedule pods on nodes with startup taints", func() {
+			minReplicas := int32(0)
+			maxReplicas := int32(3)
+
+			By("Creating MachineSet with 0 replicas")
+
+			targetedNodeLabel := fmt.Sprintf("%v-startup-taint", autoscalerWorkerNodeRoleLabel)
+			machineSetParams := framework.BuildMachineSetParams(ctx, client, int(minReplicas))
+			machineSetParams.Labels[targetedNodeLabel] = ""
+			machineSetParams.Taints = []corev1.Taint{
+				{
+					Key:    startupTaintKey,
+					Effect: "NoSchedule",
+				},
+			}
+
+			By("Waiting for the MachineSet to be created")
+			machineSet, err := framework.CreateMachineSet(client, machineSetParams)
+			Expect(err).ToNot(HaveOccurred(), "Failed to create MachineSet with 0 replicas")
+
+			cleanupObjects[machineSet.GetName()] = machineSet
+
+			uniqueJobName := fmt.Sprintf("%s-startup-taint", workloadJobName)
+
+			By(fmt.Sprintf("Creating a MachineAutoscaler backed by MachineSet %s - min: %d, max: %d",
+				machineSet.GetName(), minReplicas, maxReplicas))
+			asr := machineAutoscalerResource(machineSet, minReplicas, maxReplicas)
+			Expect(client.Create(ctx, asr)).Should(Succeed(), "Failed to create MachineAutoscaler")
+			cleanupObjects[asr.GetName()] = asr
+
+			By(fmt.Sprintf("Creating startup-taint workload %s: jobs: %v, memory: %s", uniqueJobName, minReplicas+1, workloadMemRequest.String()))
+			workload := framework.NewWorkLoad(minReplicas+1, workloadMemRequest, uniqueJobName, autoscalingTestLabel, "", corev1.NodeSelectorRequirement{
+				Key:      targetedNodeLabel,
+				Operator: corev1.NodeSelectorOpExists,
+			})
+			cleanupObjects[workload.GetName()] = workload
+
+			Expect(client.Create(ctx, workload)).Should(Succeed(), "Failed to create scale-out workload %s", workloadJobName)
+
+			job := &batchv1.Job{}
+			key := runtimeclient.ObjectKey{Namespace: framework.MachineAPINamespace, Name: workload.GetName()}
+			err = client.Get(ctx, key, job)
+			Expect(err).ToNot(HaveOccurred(), "getting workload job should not error")
+
+			By("Waiting node to be ready")
+			framework.WaitForMachineSet(ctx, client, machineSet.GetName())
+
+			By("The pod shouldn't schedule on the node with startup taint")
+			Consistently(func() (int32, error) {
+				if err := client.Get(ctx, key, job); err != nil {
+					return 0, err
+				}
+
+				podList := &corev1.PodList{}
+				listOpts := []runtimeclient.ListOption{
+					runtimeclient.InNamespace(job.Namespace),
+					runtimeclient.MatchingLabels(job.Spec.Template.ObjectMeta.Labels),
+				}
+
+				if err := client.List(ctx, podList, listOpts...); err != nil {
+					return 0, err
+				}
+
+				// there's a chance that some job pods may have completed, but realistically this should not happen
+				// if so, just fail the test
+				if job.Status.Succeeded > 0 || job.Status.Failed > 0 {
+					return 0, StopTrying(fmt.Sprintf("job %q with %d succeeded and %d failed pods", workload.GetName(), job.Status.Succeeded, job.Status.Failed))
+				}
+
+				var pendingPods int32
+
+				for _, pod := range podList.Items {
+					if pod.Status.Phase == corev1.PodPending {
+						pendingPods++
+					}
+				}
+
+				return pendingPods, nil
+			}, framework.WaitMedium, framework.RetryShort).Should(BeEquivalentTo(minReplicas+1),
+				"Pod should not schedule on node with startup taint")
+
+			By("Removing the startup taint from the node")
+			Eventually(func() (int, error) {
+				ms, err := framework.GetMachineSet(ctx, client, machineSet.GetName())
+				if err != nil {
+					return 0, err
+				}
+
+				By(fmt.Sprintf("MachineSet name: %s", ms.GetName()))
+
+				nodes, err := framework.GetNodesFromMachineSet(ctx, client, ms)
+				if err != nil {
+					return 0, err
+				}
+
+				if len(nodes) == 0 {
+					return 0, fmt.Errorf("no nodes found for machineset %s", ms.GetName())
+				}
+
+				nodeReadyCounter := 0
+
+				for _, node := range nodes {
+					if framework.IsNodeReady(node) {
+						// Remove the startup taint from the node that is ready
+						var updatedTaints []corev1.Taint
+						for _, taint := range node.Spec.Taints {
+							if taint.Key != startupTaintKey {
+								updatedTaints = append(updatedTaints, taint)
+							}
+						}
+						node.Spec.Taints = updatedTaints
+
+						err = client.Update(ctx, node)
+						if err != nil {
+							return 0, err
+						}
+
+						By(fmt.Sprintf("Node name that has taint removed: %s", node.GetName()))
+
+						nodeReadyCounter++
+					}
+				}
+
+				return nodeReadyCounter, nil
+			}, framework.WaitLong, framework.RetryMedium).Should(BeEquivalentTo(minReplicas+1), fmt.Sprintf("node ready counter is different from expected :%d", minReplicas+1))
+
+			By(fmt.Sprintf("Waiting for %d workload pods to be running after untainting",
+				minReplicas+1))
+			framework.WaitForWorkload(ctx, client, machineSet, minReplicas+1, workload.GetName())
+		})
+	})
 })

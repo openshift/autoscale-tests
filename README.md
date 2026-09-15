@@ -1,8 +1,10 @@
 # OpenShift Autoscale Tests
 
+End-to-end test suites for autoscaling components on OpenShift clusters.
 End-to-end test suites for the autoscaling components of OpenShift, owned by the
 OpenShift Autoscaling team.
 
+## Test Suites
 OpenShift ships several independent autoscalers, each in its own repository with its
 own operator, operand, and for some products, its own release cadence. This repository is the single place where
 their end-to-end behaviour is verified against a real cluster: it holds no product
@@ -10,8 +12,17 @@ code, only the tests and the shared Go framework they are built on. It is the
 consolidation target for autoscaling tests that previously lived in the internal
 `openshift-tests-private` repository.
 
+
+| Suite | Directory | Description |
+|-------|-----------|-------------|
+| HPA | `test/e2e/hpa/` | Horizontal Pod Autoscaler (CPU, memory, container-resource scaling) |
+| VPA | `test/e2e/vpa/` | Vertical Pod Autoscaler (recommender, admission controller, updater) |
+| CRO | `test/e2e/cro/` | Cluster Resource Override admission webhook |
+| CMA | `test/e2e/cma/` | Custom Metrics Autoscaler / KEDA (cron, CPU, memory, scale-to-zero) |
+| CAS | `cas/` | Cluster Autoscaler (autoscaler, machine approver, ProvisioningRequest) |
 ## What is tested
 
+The root module (`test/e2e/`) and CAS (`cas/`) are separate Go modules with independent dependency management.
 | Suite | Directory | Component under test | Operator repository |
 |-------|-----------|----------------------|---------------------|
 | HPA | `test/e2e/hpa/` | Horizontal Pod Autoscaler — CPU, memory, and container-resource scaling | Built into OpenShift (`kube-controller-manager`); no operator |
@@ -76,8 +87,34 @@ make cas-lint      # CAS module
 make check         # Lint + unit tests
 ```
 
+
+## CAS Ginkgo Labels
+CAS tests use [Ginkgo labels](https://onsi.github.io/ginkgo/#spec-labels) for test selection. The available labels are defined in `cas/pkg/framework/ginkgo-labels.go`:
+
+| Label | Purpose |
+|-------|---------|
+| `autoscaler` | Cluster Autoscaler tests |
+| `capi` | Cluster API tests |
+| `ccm` | Cloud Controller Manager tests |
+| `mapi` | Machine API tests |
+| `machine-approver` | Machine Approver tests |
+| `machine-health-check` | Machine Health Check tests |
+| `periodic` | Tests meant for periodic CI runs |
+| `tech-preview` | Tests requiring a TechPreview/DevPreview cluster |
+| `disruptive` | Tests that may affect cluster stability |
+| `LEVEL0` | Critical tests that block release if failed |
+| `dev-only` | Tests that require a dev account |
+| `qe-only` | Tests that require a QE account |
+| `connected-only` | Tests that require a connected cluster |
+
+Labels drive the Makefile targets:
+- `test-e2e-cas` runs `--label-filter='!periodic'`
+- `test-e2e-cas-periodic` runs `--label-filter='periodic'`
+- `test-e2e-cas-techpreview` runs `--label-filter='tech-preview'`
+
 ## CI
 
+This repository is consumed by OpenShift CI. The `.ci-operator.yaml` defines the build-root image. Prow job definitions live in the [openshift/release](https://github.com/openshift/release) repository.
 This repository is consumed by OpenShift CI. The `.ci-operator.yaml` defines the build-root image. Prow job definitions live in the [openshift/release](https://github.com/openshift/release/tree/master/ci-operator/config/openshift/autoscale-tests) repository.
 
 When running in CI, the framework detects the environment via `OPENSHIFT_CI` and `ARTIFACT_DIR` variables and writes JUnit XML reports and artifacts accordingly.

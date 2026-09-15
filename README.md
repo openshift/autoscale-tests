@@ -89,6 +89,7 @@ make check         # Lint + unit tests
 
 
 ## CAS Ginkgo Labels
+
 CAS tests use [Ginkgo labels](https://onsi.github.io/ginkgo/#spec-labels) for test selection. The available labels are defined in `cas/pkg/framework/ginkgo-labels.go`:
 
 | Label | Purpose |

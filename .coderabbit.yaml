@@ -1,0 +1,96 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Docs: https://docs.coderabbit.ai/getting-started/configure-coderabbit
+
+language: en-US
+early_access: false
+
+reviews:
+  profile: "chill"
+  high_level_summary: false
+  poem: false
+  request_changes_workflow: false
+  collapse_walkthrough: true
+
+  path_filters:
+    - "!vendor/**"
+    - "!**/vendor/**"
+    - "!**/zz_generated*"
+    - "!go.sum"
+    - "!**/go.sum"
+
+  path_instructions:
+    - path: "pkg/framework/**/*.go"
+      instructions: |
+        Shared helpers used by the HPA, VPA, CRO, and CMA suites — changes
+        here have a wide blast radius. Verify that waits use
+        wait.PollUntilContextTimeout with an explicit, generous timeout
+        rather than time.Sleep, that every created resource has a matching
+        cleanup path, and that goroutines started by a helper are stopped
+        by its CleanUp/Delete counterpart. Typed clients only work for the
+        groups registered in newScheme() (core/v1, apps/v1, autoscaling
+        v1 and v2); everything else must use unstructured.
+
+    - path: "test/e2e/**/*_test.go"
+      instructions: |
+        E2E specs that require a live OpenShift cluster. Check for
+        deterministic spec names, a per-test namespace created with
+        CreateTestNamespace and deleted in AfterEach, CleanUp() on any
+        ResourceConsumer, and realistic timeouts — autoscaling reacts on a
+        metrics-scrape cadence, so short timeouts become flakes. Specs must
+        not assume exclusive ownership of the cluster-singleton
+        ClusterResourceOverride "cluster" or VerticalPodAutoscalerController
+        "default". Operator uninstall in AfterSuite must stay conditional on
+        the suite having installed it.
+
+    - path: "cas/pkg/**/*.go"
+      instructions: |
+        Cluster Autoscaler suite in a separate, vendored Go module. Verify
+        new specs carry the right Ginkgo labels from
+        cas/pkg/framework/ginkgo-labels.go — in particular `periodic`,
+        `tech-preview`, and `disruptive`, which drive the Makefile label
+        filters and the CI job matrix. Prefer the framework's
+        WaitShort/WaitMedium/WaitLong values over hardcoded durations so
+        slower platforms keep working.
+
+    - path: "testdata/**/*.yaml"
+      instructions: |
+        Go-template fixtures rendered at runtime by RenderTemplate, which
+        resolves this directory by path from the framework source file.
+        There is no compile-time link between Go code and these filenames,
+        so check that renames and new files match their call sites and that
+        every template action has a corresponding field on the config
+        struct passed in.
+
+    - path: "**/Makefile"
+      instructions: |
+        CI invokes these targets by name from openshift/release. Renaming or
+        removing a target breaks jobs defined in another repository — flag
+        any such change. Root targets cover the root module only; CAS work
+        must be delegated with `make -C cas`.
+
+    - path: "**/*.sh"
+      instructions: |
+        These scripts run in CI. Check for error handling, shellcheck
+        compliance, correct quoting of paths and KUBECONFIG, and that the
+        script still matches what the CI job expects.
+
+  tools:
+    gitleaks:
+      enabled: true
+    golangci-lint:
+      enabled: true
+    hadolint:
+      enabled: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/AGENTS.md"
+      - "**/CONTRIBUTING.md"
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  pull_requests:
+    scope: auto
